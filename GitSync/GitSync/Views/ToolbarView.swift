@@ -15,7 +15,8 @@ struct ToolbarView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(model.repositoryPath ?? "")
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(-1)
 
             if model.isBusy {
                 ProgressView()
@@ -74,6 +75,8 @@ struct ToolbarView: View {
                     Task { await model.push() }
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -110,11 +113,13 @@ private struct ToolbarActionButton: View {
             Label(title, systemImage: systemImage)
                 .font(.system(size: 13, weight: .medium))
                 .labelStyle(.titleAndIcon)
-                .padding(.horizontal, 10)
-                .frame(minWidth: 72, minHeight: 30)
-                .contentShape(RoundedRectangle(cornerRadius: 7))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 32)
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: true)
         .foregroundStyle(isDisabled ? Color.secondary : Color.primary)
         .background {
             RoundedRectangle(cornerRadius: 7)
