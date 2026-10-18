@@ -11,87 +11,93 @@ struct HistoryList: View {
     }()
 
     var body: some View {
-        if model.commits.isEmpty {
-            Text("还没有提交")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(model.commits) { commit in
-                        commitRow(commit)
-                    }
-                    if model.canLoadMoreHistory {
-                        Button("加载更多") {
-                            Task { await model.loadMoreHistory() }
+        VStack(spacing: 0) {
+            HStack {
+                Text("提交历史")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(model.commits.count)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
+            if model.commits.isEmpty {
+                Text("还没有提交")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(model.commits) { commit in
+                            commitRow(commit)
                         }
-                        .disabled(model.isWorking)
-                        .padding(.vertical, 8)
+                        if model.canLoadMoreHistory {
+                            Button("加载更多") {
+                                Task { await model.loadMoreHistory() }
+                            }
+                            .disabled(model.isWorking)
+                            .padding(.vertical, 10)
+                        }
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
                 }
-                .padding(8)
             }
         }
     }
 
     private func commitRow(_ commit: CommitRecord) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(commit.subject.isEmpty ? "（无说明）" : commit.subject)
-                        .lineLimit(2)
-                    Spacer(minLength: 8)
-                    Text(commit.shortHash)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+        let isSelected = model.selectedCommitHash == commit.hash
+        return Button {
+            Task { await model.selectCommit(commit.hash) }
+        } label: {
+            HStack(alignment: .top, spacing: 9) {
+                VStack(spacing: 0) {
+                    Circle()
+                        .fill(isSelected ? Color.white : Color.accentColor)
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 5)
+                    Rectangle()
+                        .fill(isSelected ? Color.white.opacity(0.45) : Color.secondary.opacity(0.2))
+                        .frame(width: 1)
+                        .frame(minHeight: 34)
                 }
-                Text("\(commit.authorName) · \(Self.relative.localizedString(for: commit.date, relativeTo: Date()))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .help(commit.authorEmail)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                Task { await model.toggleCommit(commit.hash) }
-            }
 
-            if model.expandedCommit == commit.hash {
-                let files = model.commitFiles[commit.hash] ?? []
-                if files.isEmpty {
-                    Text("这次提交没有改动文件")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 8)
-                } else {
-                    ForEach(files) { file in
-                        HStack(spacing: 8) {
-                            Text(file.label)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, alignment: .leading)
-                            Text(file.path)
-                                .font(.system(.callout, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            model.selectedHistoryHash == commit.hash && model.selectedHistoryPath == file.path
-                                ? Color.accentColor.opacity(0.16)
-                                : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 6)
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            model.selectHistoryFile(hash: commit.hash, path: file.path)
-                        }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(commit.subject.isEmpty ? "（无说明）" : commit.subject)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.crop.circle.fill")
+                        Text(commit.authorName)
+                            .lineLimit(1)
+                        Text("·")
+                        Text(Self.relative.localizedString(for: commit.date, relativeTo: Date()))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(commit.shortHash)
+                            .font(.system(.caption2, design: .monospaced))
                     }
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.78) : Color.secondary)
+                    .help(commit.authorEmail)
                 }
             }
+            .padding(.horizontal, 9)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(
+                isSelected ? Color.accentColor : Color.clear,
+                in: RoundedRectangle(cornerRadius: 7)
+            )
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
         }
-        .padding(8)
-        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+        .buttonStyle(.plain)
     }
 }

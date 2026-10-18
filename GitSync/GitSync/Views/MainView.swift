@@ -12,7 +12,7 @@ struct MainView: View {
                 workspace
             }
         }
-        .frame(minWidth: 900, minHeight: 560)
+        .frame(minWidth: 1000, minHeight: 600)
         .navigationTitle(model.windowTitle)
         .background(WindowAutosave())
         .task { await model.restoreLastIfNeeded() }
@@ -44,7 +44,15 @@ struct MainView: View {
             Divider()
             HSplitView {
                 sidebar
-                    .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                    .frame(
+                        minWidth: model.mode == .history ? 230 : 280,
+                        idealWidth: model.mode == .history ? 270 : 340,
+                        maxWidth: model.mode == .history ? 380 : 520
+                    )
+                if model.mode == .history {
+                    CommitFilesView(model: model)
+                        .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
+                }
                 DiffView(model: model)
                     .frame(minWidth: 420)
             }

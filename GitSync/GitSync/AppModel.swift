@@ -22,7 +22,8 @@ final class AppModel {
     var mode: SidebarMode = .changes
     var commits: [CommitRecord] = []
     var canLoadMoreHistory = false
-    var expandedCommit: String?
+    var selectedCommitHash: String?
+    var loadingCommitHash: String?
     var commitFiles: [String: [CommitFile]] = [:]
     var selectedHistoryHash: String?
     var selectedHistoryPath: String?
@@ -82,6 +83,16 @@ final class AppModel {
 
     var showsCommitBar: Bool {
         mode == .changes || mergeInProgress
+    }
+
+    var selectedCommit: CommitRecord? {
+        guard let selectedCommitHash else { return nil }
+        return commits.first { $0.hash == selectedCommitHash }
+    }
+
+    var selectedCommitFiles: [CommitFile] {
+        guard let selectedCommitHash else { return [] }
+        return commitFiles[selectedCommitHash] ?? []
     }
 
     func chooseRepository() {
@@ -177,6 +188,10 @@ final class AppModel {
         if newMode == .history {
             if let hash = selectedHistoryHash, let path = selectedHistoryPath {
                 Task { await loadHistoryDiff(hash: hash, path: path) }
+            } else if let selectedCommitHash {
+                Task { await selectCommit(selectedCommitHash) }
+            } else if let first = commits.first {
+                Task { await selectCommit(first.hash) }
             } else {
                 diff = .empty
                 diffTitle = ""
@@ -189,18 +204,32 @@ final class AppModel {
         }
     }
 
-    func toggleCommit(_ hash: String) async {
-        if expandedCommit == hash {
-            expandedCommit = nil
+    func selectCommit(_ hash: String) async {
+        selectedCommitHash = hash
+        selectedHistoryHash = hash
+        selectedHistoryPath = nil
+        diff = .empty
+        diffTitle = ""
+
+        if let files = commitFiles[hash] {
+            if let first = files.first {
+                selectHistoryFile(hash: hash, path: first.path)
+            }
             return
         }
-        expandedCommit = hash
-        guard commitFiles[hash] == nil, let cwd = repositoryURL else { return }
+
+        guard let cwd = repositoryURL else { return }
+        loadingCommitHash = hash
+        defer {
+            if loadingCommitHash == hash {
+                loadingCommitHash = nil
+            }
+        }
         let output = await GitClient.run(
             args: ["show", "--first-parent", "-z", "--name-status", "--pretty=format:", hash],
             cwd: cwd
         )
-        guard expandedCommit == hash else { return }
+        guard selectedCommitHash == hash else { return }
         guard output.exitCode == 0 else {
             present(action: "刷新", outputs: [output])
             return
@@ -208,9 +237,13 @@ final class AppModel {
         var loaded = commitFiles
         loaded[hash] = LogParser.parseNameStatus(output.stdout)
         commitFiles = loaded
+        if let first = loaded[hash]?.first {
+            selectHistoryFile(hash: hash, path: first.path)
+        }
     }
 
     func selectHistoryFile(hash: String, path: String) {
+        selectedCommitHash = hash
         selectedHistoryHash = hash
         selectedHistoryPath = path
         Task { await loadHistoryDiff(hash: hash, path: path) }
@@ -807,6 +840,15 @@ final class AppModel {
             commits.append(contentsOf: parsed)
         }
         canLoadMoreHistory = parsed.count == 100
+
+        if reset, mode == .history {
+            let selectionIsVisible = selectedCommitHash.map { selected in
+                commits.contains { $0.hash == selected }
+            } ?? false
+            if !selectionIsVisible, let first = commits.first {
+                await selectCommit(first.hash)
+            }
+        }
     }
 
     private func applyFiles(_ parsed: [FileChange]) {
@@ -878,7 +920,10 @@ final class AppModel {
         diffToken += 1
         let token = diffToken
         let output = await GitClient.run(
-            args: ["show", "--no-ext-diff", "--no-color", hash, "--", path],
+            args: [
+                "show", "-m", "--first-parent", "--format=",
+                "--no-ext-diff", "--no-color", hash, "--", path,
+            ],
             cwd: cwd
         )
         guard !cancelRequested else { return }
@@ -973,7 +1018,8 @@ final class AppModel {
         selectedPath = nil
         commits = []
         canLoadMoreHistory = false
-        expandedCommit = nil
+        selectedCommitHash = nil
+        loadingCommitHash = nil
         commitFiles = [:]
         selectedHistoryHash = nil
         selectedHistoryPath = nil

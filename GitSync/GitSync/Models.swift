@@ -69,6 +69,8 @@ nonisolated enum DiffLineKind: Hashable, Sendable {
 nonisolated struct DiffLine: Hashable, Sendable {
     var kind: DiffLineKind
     var text: String
+    var oldLineNumber: Int? = nil
+    var newLineNumber: Int? = nil
 }
 
 nonisolated struct DiffDocument: Hashable, Sendable {
@@ -77,6 +79,14 @@ nonisolated struct DiffDocument: Hashable, Sendable {
     var truncated: Bool
 
     static let empty = DiffDocument(lines: [], isBinary: false, truncated: false)
+
+    var additionCount: Int {
+        lines.reduce(0) { $0 + ($1.kind == .add ? 1 : 0) }
+    }
+
+    var deletionCount: Int {
+        lines.reduce(0) { $0 + ($1.kind == .delete ? 1 : 0) }
+    }
 }
 
 nonisolated struct GitOutput: Sendable {

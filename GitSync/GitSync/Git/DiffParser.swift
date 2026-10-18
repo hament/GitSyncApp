@@ -9,6 +9,8 @@ enum DiffParser {
         }
         var lines: [DiffLine] = []
         var truncated = false
+        var oldLineNumber = 0
+        var newLineNumber = 0
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(raw)
             if line.isEmpty { continue }
@@ -17,9 +19,67 @@ enum DiffParser {
                 truncated = true
                 break
             }
-            lines.append(DiffLine(kind: kind, text: line))
+            switch kind {
+            case .hunk:
+                if let starts = hunkStarts(line) {
+                    oldLineNumber = starts.old
+                    newLineNumber = starts.new
+                }
+                lines.append(DiffLine(kind: .hunk, text: line))
+            case .add:
+                lines.append(
+                    DiffLine(
+                        kind: .add,
+                        text: line,
+                        oldLineNumber: nil,
+                        newLineNumber: newLineNumber
+                    )
+                )
+                newLineNumber += 1
+            case .delete:
+                lines.append(
+                    DiffLine(
+                        kind: .delete,
+                        text: line,
+                        oldLineNumber: oldLineNumber,
+                        newLineNumber: nil
+                    )
+                )
+                oldLineNumber += 1
+            case .context:
+                if line.hasPrefix("\\") {
+                    lines.append(DiffLine(kind: .context, text: line))
+                } else {
+                    lines.append(
+                        DiffLine(
+                            kind: .context,
+                            text: line,
+                            oldLineNumber: oldLineNumber,
+                            newLineNumber: newLineNumber
+                        )
+                    )
+                    oldLineNumber += 1
+                    newLineNumber += 1
+                }
+            }
         }
         return DiffDocument(lines: lines, isBinary: false, truncated: truncated)
+    }
+
+    private static func hunkStarts(_ line: String) -> (old: Int, new: Int)? {
+        let fields = line.split(separator: " ")
+        guard fields.count >= 3,
+              let old = lineStart(String(fields[1]), prefix: "-"),
+              let new = lineStart(String(fields[2]), prefix: "+") else {
+            return nil
+        }
+        return (old, new)
+    }
+
+    private static func lineStart(_ field: String, prefix: Character) -> Int? {
+        guard field.first == prefix else { return nil }
+        let value = field.dropFirst().split(separator: ",", maxSplits: 1).first
+        return value.flatMap { Int($0) }
     }
 
     private static func classify(_ line: String) -> DiffLineKind? {
