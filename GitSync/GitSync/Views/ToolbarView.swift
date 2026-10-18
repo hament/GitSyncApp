@@ -6,7 +6,6 @@ struct ToolbarView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                ProjectMenu(model: model)
                 BranchMenu(model: model)
 
                 Spacer(minLength: 12)
@@ -78,24 +77,31 @@ struct ToolbarView: View {
 
             Divider()
 
-            HStack(spacing: 7) {
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                Text("项目路径")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(model.repositoryPath ?? "")
-                    .font(.system(.callout, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .help(model.repositoryPath ?? "")
-                Spacer(minLength: 0)
+            HStack(alignment: .center, spacing: 12) {
+                ProjectMenu(model: model)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(repositoryName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .lineLimit(1)
+                    Text(model.repositoryPath ?? "")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .help(model.repositoryPath ?? "")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(Color.primary.opacity(0.025))
         }
+    }
+
+    private var repositoryName: String {
+        guard let path = model.repositoryPath, !path.isEmpty else { return "未选择项目" }
+        return URL(fileURLWithPath: path).lastPathComponent
     }
 
     private var pullHelp: String {
