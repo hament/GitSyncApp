@@ -1,6 +1,7 @@
 # GitSync
 
-Mac 上的 Git 可视化工具。本机已安装 Xcode 后，不需要打开 Xcode 窗口，在终端里就能编译并启动。
+Mac 上的 Git 可视化工具。本机已安装 Xcode 后，不需要打开 Xcode 窗口，在终端里就能编译并启动。1
+demo1分支
 
 ## 直接运行
 
