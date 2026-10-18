@@ -23,20 +23,42 @@ struct DiffView: View {
             emptyState("二进制文件，不显示差异", systemImage: "doc.zipper")
         } else if model.diff.lines.isEmpty {
             emptyState("没有差异", systemImage: "checkmark.circle")
+        } else if model.diffLayoutMode == .split {
+            splitContent
         } else {
+            unifiedContent
+        }
+    }
+
+    private var unifiedContent: some View {
+        ScrollView([.vertical, .horizontal]) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if model.diff.truncated {
+                    truncatedNotice
+                }
+                ForEach(Array(model.diff.lines.enumerated()), id: \.offset) { index, line in
+                    diffRow(line, index: index)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    private var splitContent: some View {
+        GeometryReader { geometry in
+            let paneWidth = splitPaneWidth(availableWidth: geometry.size.width)
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    splitColumnHeader(paneWidth: paneWidth)
                     if model.diff.truncated {
-                        Text("差异过长，已截断")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                        truncatedNotice
+                            .frame(width: paneWidth * 2 + 1, alignment: .leading)
                     }
-                    ForEach(Array(model.diff.lines.enumerated()), id: \.offset) { index, line in
-                        diffRow(line, index: index)
+                    ForEach(Array(model.diff.splitRows.enumerated()), id: \.offset) { index, row in
+                        splitRow(row, index: index, paneWidth: paneWidth)
                     }
                 }
+                .frame(minWidth: paneWidth * 2 + 1, alignment: .leading)
                 .padding(.bottom, 8)
             }
         }
@@ -67,6 +89,20 @@ struct DiffView: View {
             Text(model.mode == .history ? "提交差异" : "工作区差异")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Picker(
+                "显示模式",
+                selection: Binding(
+                    get: { model.diffLayoutMode },
+                    set: { model.diffLayoutMode = $0 }
+                )
+            ) {
+                Text("Unified").tag(DiffLayoutMode.unified)
+                Text("Split").tag(DiffLayoutMode.split)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 142)
 
             changeBadge("+\(model.diff.additionCount)", color: .green)
             changeBadge("−\(model.diff.deletionCount)", color: .red)
@@ -119,6 +155,117 @@ struct DiffView: View {
             }
         }
         .accessibilityLabel("第 \(index + 1) 行，\(line.text)")
+    }
+
+    private func splitColumnHeader(paneWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            splitColumnTitle("旧文件", systemImage: "arrow.left", width: paneWidth)
+            Rectangle()
+                .fill(Color.primary.opacity(0.13))
+                .frame(width: 1, height: 30)
+            splitColumnTitle("新文件", systemImage: "arrow.right", width: paneWidth)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.1))
+                .frame(height: 1)
+        }
+    }
+
+    private func splitColumnTitle(_ title: String, systemImage: String, width: CGFloat) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .frame(width: width, height: 30, alignment: .leading)
+    }
+
+    private func splitRow(_ row: SplitDiffRow, index: Int, paneWidth: CGFloat) -> some View {
+        Group {
+            switch row {
+            case .hunk(let text):
+                HStack(spacing: 0) {
+                    Text(text)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 10)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                }
+                .frame(width: paneWidth * 2 + 1, height: 22, alignment: .leading)
+                .background(Color.blue.opacity(0.08))
+            case .lines(let old, let new):
+                HStack(spacing: 0) {
+                    splitCell(old, isOldSide: true, width: paneWidth)
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.13))
+                        .frame(width: 1, height: 22)
+                    splitCell(new, isOldSide: false, width: paneWidth)
+                }
+            }
+        }
+        .accessibilityLabel("对比第 \(index + 1) 行")
+    }
+
+    private func splitCell(_ line: DiffLine?, isOldSide: Bool, width: CGFloat) -> some View {
+        let number = isOldSide ? line?.oldLineNumber : line?.newLineNumber
+        let kind = line?.kind
+        let marker: String = {
+            if isOldSide, kind == .delete { return "−" }
+            if !isOldSide, kind == .add { return "+" }
+            return ""
+        }()
+
+        return HStack(spacing: 0) {
+            splitLineNumber(number)
+            Text(marker)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(kind.map(foreground) ?? .secondary)
+                .frame(width: 24)
+            if let line {
+                Text(contentText(line))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(foreground(line.kind))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 12)
+        }
+        .frame(width: width, height: 22, alignment: .leading)
+        .background(kind.map(background) ?? Color.primary.opacity(0.018))
+        .clipped()
+    }
+
+    private func splitLineNumber(_ number: Int?) -> some View {
+        Text(number.map(String.init) ?? "")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .frame(width: 46, height: 22, alignment: .trailing)
+            .padding(.trailing, 7)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(width: 1)
+            }
+    }
+
+    private func splitPaneWidth(availableWidth: CGFloat) -> CGFloat {
+        let longestLine = model.diff.lines
+            .filter { $0.kind != .hunk }
+            .map { contentText($0).count }
+            .max() ?? 0
+        let estimatedContentWidth = min(CGFloat(longestLine) * 7.25 + 90, 2_000)
+        return max((availableWidth - 1) / 2, max(360, estimatedContentWidth))
+    }
+
+    private var truncatedNotice: some View {
+        Text("差异过长，已截断")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
     }
 
     private func lineNumber(_ number: Int?) -> some View {

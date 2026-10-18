@@ -66,6 +66,11 @@ nonisolated enum DiffLineKind: Hashable, Sendable {
     case context
 }
 
+nonisolated enum DiffLayoutMode: String, CaseIterable, Hashable, Sendable {
+    case unified
+    case split
+}
+
 nonisolated struct DiffLine: Hashable, Sendable {
     var kind: DiffLineKind
     var text: String
@@ -87,6 +92,51 @@ nonisolated struct DiffDocument: Hashable, Sendable {
     var deletionCount: Int {
         lines.reduce(0) { $0 + ($1.kind == .delete ? 1 : 0) }
     }
+
+    var splitRows: [SplitDiffRow] {
+        var rows: [SplitDiffRow] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index]
+            switch line.kind {
+            case .hunk:
+                rows.append(.hunk(line.text))
+                index += 1
+            case .context:
+                rows.append(.lines(old: line, new: line))
+                index += 1
+            case .add, .delete:
+                var deletions: [DiffLine] = []
+                var additions: [DiffLine] = []
+                while index < lines.count {
+                    let changed = lines[index]
+                    guard changed.kind == .add || changed.kind == .delete else { break }
+                    if changed.kind == .delete {
+                        deletions.append(changed)
+                    } else {
+                        additions.append(changed)
+                    }
+                    index += 1
+                }
+                let count = max(deletions.count, additions.count)
+                for pairIndex in 0..<count {
+                    rows.append(
+                        .lines(
+                            old: pairIndex < deletions.count ? deletions[pairIndex] : nil,
+                            new: pairIndex < additions.count ? additions[pairIndex] : nil
+                        )
+                    )
+                }
+            }
+        }
+        return rows
+    }
+}
+
+nonisolated enum SplitDiffRow: Hashable, Sendable {
+    case hunk(String)
+    case lines(old: DiffLine?, new: DiffLine?)
 }
 
 nonisolated struct GitOutput: Sendable {

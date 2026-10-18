@@ -30,6 +30,16 @@ final class AppModel {
 
     var diff = DiffDocument.empty
     var diffTitle = ""
+    var diffLayoutMode: DiffLayoutMode = {
+        guard let rawValue = UserDefaults.standard.string(forKey: "diffLayoutMode") else {
+            return .unified
+        }
+        return DiffLayoutMode(rawValue: rawValue) ?? .unified
+    }() {
+        didSet {
+            UserDefaults.standard.set(diffLayoutMode.rawValue, forKey: "diffLayoutMode")
+        }
+    }
 
     var commitMessage = ""
     var isBusy = false
