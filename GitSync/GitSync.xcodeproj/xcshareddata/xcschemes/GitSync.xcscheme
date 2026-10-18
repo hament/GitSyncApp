@@ -47,6 +47,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000100000000"
             BuildableName = "GitSync.app"
+            BlueprintName = "GitSync"
             ReferencedContainer = "container:GitSync.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
