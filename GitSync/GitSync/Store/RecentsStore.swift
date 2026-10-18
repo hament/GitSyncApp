@@ -2,14 +2,32 @@ import Foundation
 
 enum RecentsStore {
     private static let lastKey = "lastRepositoryPath"
+    private static let repositoriesKey = "recentRepositoryPaths"
     private static let branchesKey = "recentBranchesByRepo"
-    private static let limit = 8
+    private static let branchLimit = 8
+    private static let repositoryLimit = 20
 
     static func lastRepository() -> String? {
-        UserDefaults.standard.string(forKey: lastKey)
+        recentRepositories().first ?? UserDefaults.standard.string(forKey: lastKey)
     }
 
     static func setLastRepository(_ path: String) {
+        rememberRepository(path)
+    }
+
+    static func recentRepositories() -> [String] {
+        UserDefaults.standard.stringArray(forKey: repositoriesKey) ?? []
+    }
+
+    static func rememberRepository(_ path: String) {
+        guard !path.isEmpty else { return }
+        var repositories = recentRepositories()
+        repositories.removeAll { $0 == path }
+        repositories.insert(path, at: 0)
+        if repositories.count > repositoryLimit {
+            repositories = Array(repositories.prefix(repositoryLimit))
+        }
+        UserDefaults.standard.set(repositories, forKey: repositoriesKey)
         UserDefaults.standard.set(path, forKey: lastKey)
     }
 
@@ -24,8 +42,8 @@ enum RecentsStore {
         var list = map[path] ?? []
         list.removeAll { $0 == name }
         list.insert(name, at: 0)
-        if list.count > limit {
-            list = Array(list.prefix(limit))
+        if list.count > branchLimit {
+            list = Array(list.prefix(branchLimit))
         }
         map[path] = list
         UserDefaults.standard.set(map, forKey: branchesKey)

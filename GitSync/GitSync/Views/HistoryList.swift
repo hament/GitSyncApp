@@ -25,7 +25,7 @@ struct HistoryList: View {
                         Button("加载更多") {
                             Task { await model.loadMoreHistory() }
                         }
-                        .disabled(model.isBusy)
+                        .disabled(model.isWorking)
                         .padding(.vertical, 8)
                     }
                 }

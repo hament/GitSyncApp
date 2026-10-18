@@ -13,7 +13,7 @@ struct ChangesList: View {
                 Button(model.allChecked ? "取消全选" : "全选") {
                     model.toggleSelectAll()
                 }
-                .disabled(model.files.isEmpty || model.isBusy)
+                .disabled(model.files.isEmpty || model.isWorking)
                 .buttonStyle(.borderless)
             }
             .padding(.horizontal, 12)
@@ -48,7 +48,7 @@ struct ChangesList: View {
             )
             .toggleStyle(.checkbox)
             .labelsHidden()
-            .disabled(model.isBusy)
+            .disabled(model.isWorking)
 
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {

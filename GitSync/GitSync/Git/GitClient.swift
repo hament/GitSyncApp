@@ -1,13 +1,19 @@
+import Darwin
 import Foundation
 
 enum GitClient {
     private nonisolated static let lock = NSLock()
     private nonisolated(unsafe) static var cachedBinary: String?
+    private nonisolated static let processes = ProcessRegistry()
 
-    static func run(args: [String], cwd: URL) async -> GitOutput {
+    static func run(args: [String], cwd: URL, timeout: TimeInterval = 30) async -> GitOutput {
         await Task.detached(priority: .userInitiated) {
-            runSync(args: args, cwd: cwd)
+            runSync(args: args, cwd: cwd, timeout: timeout)
         }.value
+    }
+
+    static func cancelAll() {
+        processes.cancelAll()
     }
 
     /// Runs `base + paths` in batches. Stops after the first non-zero exit and includes that result.
@@ -26,7 +32,7 @@ enum GitClient {
         return results
     }
 
-    private nonisolated static func runSync(args: [String], cwd: URL) -> GitOutput {
+    private nonisolated static func runSync(args: [String], cwd: URL, timeout: TimeInterval) -> GitOutput {
         guard let binary = resolveBinary() else {
             return GitOutput(
                 args: args,
@@ -49,6 +55,10 @@ enum GitClient {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         process.standardInput = FileHandle.nullDevice
+        let terminated = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            terminated.signal()
+        }
 
         do {
             try process.run()
@@ -60,6 +70,8 @@ enum GitClient {
                 exitCode: -1
             )
         }
+        processes.register(process)
+        defer { processes.unregister(process) }
 
         let stdoutHandle = stdoutPipe.fileHandleForReading
         let stderrHandle = stderrPipe.fileHandleForReading
@@ -76,14 +88,28 @@ enum GitClient {
             stderrBox.set(stderrHandle.readDataToEndOfFile())
             group.leave()
         }
-        process.waitUntilExit()
+
+        var timedOut = false
+        if terminated.wait(timeout: .now() + timeout) == .timedOut {
+            timedOut = true
+            process.terminate()
+            if terminated.wait(timeout: .now() + 1) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                terminated.wait()
+            }
+        }
         group.wait()
 
+        var stderr = stderrBox.get()
+        if timedOut {
+            let suffix = "\n命令执行超过 \(Int(timeout)) 秒，已自动终止。\n"
+            stderr.append(Data(suffix.utf8))
+        }
         return GitOutput(
             args: args,
             stdout: stdoutBox.get(),
-            stderr: stderrBox.get(),
-            exitCode: process.terminationStatus
+            stderr: stderr,
+            exitCode: timedOut ? 124 : process.terminationStatus
         )
     }
 
@@ -123,6 +149,32 @@ enum GitClient {
         let current = existing?.split(separator: ":").map(String.init) ?? []
         var seen = Set<String>()
         return (extras + current).filter { seen.insert($0).inserted }.joined(separator: ":")
+    }
+}
+
+private nonisolated final class ProcessRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var running: [Int32: Process] = [:]
+
+    func register(_ process: Process) {
+        lock.lock()
+        running[process.processIdentifier] = process
+        lock.unlock()
+    }
+
+    func unregister(_ process: Process) {
+        lock.lock()
+        running.removeValue(forKey: process.processIdentifier)
+        lock.unlock()
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let processes = Array(running.values)
+        lock.unlock()
+        for process in processes where process.isRunning {
+            process.terminate()
+        }
     }
 }
 

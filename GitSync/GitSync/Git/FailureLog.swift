@@ -29,6 +29,9 @@ enum FailureLog {
         }
         let combined = outputs.map { $0.stdoutText + "\n" + $0.stderrText }.joined(separator: "\n")
         let lower = combined.lowercased()
+        if outputs.contains(where: { $0.exitCode == 124 }) {
+            return "Git 命令执行超时，已自动终止。"
+        }
         if outputs.contains(where: { $0.exitCode == -1 && $0.stderrText.contains("未找到 git") }) {
             return "未找到 git。"
         }

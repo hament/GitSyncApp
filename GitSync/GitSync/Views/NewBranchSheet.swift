@@ -23,7 +23,7 @@ struct NewBranchSheet: View {
                 Spacer()
                 Button("取消") { dismiss() }
                 Button("创建并切换") { create() }
-                    .disabled(check != .ok || model.isBusy)
+                    .disabled(check != .ok || model.isWorking)
                     .keyboardShortcut(.defaultAction)
             }
         }

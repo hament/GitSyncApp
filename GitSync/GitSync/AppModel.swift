@@ -13,6 +13,7 @@ final class AppModel {
     var localBranchNames: [String] = []
     var remoteBranchNames: [String] = []
     var recentBranchNames: [String] = []
+    var recentRepositoryPaths = RecentsStore.recentRepositories()
 
     var files: [FileChange] = []
     var checkedPaths: Set<String> = []
@@ -32,6 +33,8 @@ final class AppModel {
     var commitMessage = ""
     var isBusy = false
     var busyLabel = ""
+    var isRefreshing = false
+    var refreshLabel = ""
     var banner: String?
     var mergeInProgress = false
     var mergeSource = ""
@@ -47,6 +50,7 @@ final class AppModel {
     private var userChoseRepository = false
     private var bannerToken = 0
     private var diffToken = 0
+    private var cancelRequested = false
 
     var repositoryURL: URL? {
         repositoryPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -66,10 +70,14 @@ final class AppModel {
     }
 
     var canCommit: Bool {
-        !isBusy
+        !isWorking
             && repositoryPath != nil
             && checkedCount > 0
             && !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isWorking: Bool {
+        isBusy || isRefreshing
     }
 
     var showsCommitBar: Bool {
@@ -77,6 +85,7 @@ final class AppModel {
     }
 
     func chooseRepository() {
+        guard !isWorking else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -85,7 +94,21 @@ final class AppModel {
         panel.message = "选择一个本地 Git 仓库文件夹"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         userChoseRepository = true
-        Task { await open(folder: url, silentIfInvalid: false) }
+        startLoadingRepository(folder: url, silentIfInvalid: false)
+    }
+
+    func openRecentRepository(_ path: String) {
+        guard !isWorking else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            dialog = .plain(title: "无法打开项目", message: "项目路径已不存在：\n\(path)")
+            return
+        }
+        userChoseRepository = true
+        startLoadingRepository(
+            folder: URL(fileURLWithPath: path, isDirectory: true),
+            silentIfInvalid: false
+        )
     }
 
     func restoreLastIfNeeded() async {
@@ -94,17 +117,35 @@ final class AppModel {
         guard !userChoseRepository, let last = RecentsStore.lastRepository() else { return }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: last, isDirectory: &isDirectory), isDirectory.boolValue else { return }
-        await open(folder: URL(fileURLWithPath: last, isDirectory: true), silentIfInvalid: true)
+        await loadRepository(
+            folder: URL(fileURLWithPath: last, isDirectory: true),
+            silentIfInvalid: true
+        )
     }
 
     func refreshNow() {
-        guard !isBusy else { return }
-        Task { await refresh(alertOnFailure: true, updateDivergence: true) }
+        guard !isWorking, repositoryPath != nil else { return }
+        startRefresh(label: "正在刷新（git status / log）…") {
+            await self.refresh(alertOnFailure: true, updateDivergence: true)
+        }
     }
 
     func refreshIfIdle() {
-        guard !isBusy, repositoryPath != nil else { return }
-        Task { await refresh(alertOnFailure: false) }
+        guard !isWorking, repositoryPath != nil else { return }
+        startRefresh(label: "正在刷新仓库状态…") {
+            await self.refresh(alertOnFailure: false)
+        }
+    }
+
+    func cancelCurrentOperation() {
+        guard isWorking else { return }
+        cancelRequested = true
+        if isBusy {
+            busyLabel = "正在取消 Git 操作…"
+        } else {
+            refreshLabel = "正在取消刷新…"
+        }
+        GitClient.cancelAll()
     }
 
     func setChecked(_ path: String, _ checked: Bool) {
@@ -176,7 +217,7 @@ final class AppModel {
     }
 
     func loadMoreHistory() async {
-        guard !isBusy else { return }
+        guard !isWorking else { return }
         await loadHistory(reset: false, alertOnFailure: true)
     }
 
@@ -191,7 +232,7 @@ final class AppModel {
 
     func switchBranch(_ item: BranchItem) async {
         if !item.isRemote, item.name == currentBranchName { return }
-        guard let cwd = repositoryURL, begin("正在切换分支…") else { return }
+        guard let cwd = repositoryURL, begin("正在切换分支（git switch）…") else { return }
         defer { end() }
         let args: [String]
         let remembered: String
@@ -208,6 +249,7 @@ final class AppModel {
             remembered = item.name
         }
         let output = await GitClient.run(args: args, cwd: cwd)
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "切换分支", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -222,9 +264,10 @@ final class AppModel {
 
     func createBranch(named raw: String) async {
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let cwd = repositoryURL, begin("正在创建分支…") else { return }
+        guard let cwd = repositoryURL, begin("正在创建分支（git switch -c）…") else { return }
         defer { end() }
         let output = await GitClient.run(args: ["switch", "-c", name], cwd: cwd)
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             showNewBranch = false
             presentAfterDelay { self.present(action: "新建分支", outputs: [output]) }
@@ -258,9 +301,10 @@ final class AppModel {
             present(title: "合并失败", reason: "请先创建或切换到一个分支。", log: "未执行 Git 命令。\n当前处于分离头指针。")
             return
         }
-        guard let cwd = repositoryURL, begin("正在合并…") else { return }
+        guard let cwd = repositoryURL, begin("正在合并（git merge）…") else { return }
         defer { end() }
         let output = await GitClient.run(args: ["merge", source], cwd: cwd)
+        guard !cancelRequested else { return }
         let text = output.stdoutText + "\n" + output.stderrText
         if output.exitCode == 0 {
             if text.localizedCaseInsensitiveContains("Already up to date") {
@@ -277,9 +321,10 @@ final class AppModel {
     }
 
     func abortMerge() async {
-        guard let cwd = repositoryURL, begin("正在中止合并…") else { return }
+        guard let cwd = repositoryURL, begin("正在中止合并（git merge --abort）…") else { return }
         defer { end() }
         let output = await GitClient.run(args: ["merge", "--abort"], cwd: cwd)
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "中止合并", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -294,7 +339,8 @@ final class AppModel {
         let selected = files.filter { checkedPaths.contains($0.path) }
         guard !message.isEmpty, !selected.isEmpty else { return }
         let finishingMerge = mergeInProgress
-        guard let cwd = repositoryURL, begin(finishingMerge ? "正在完成合并…" : "正在提交…") else { return }
+        guard let cwd = repositoryURL,
+              begin(finishingMerge ? "正在完成合并（git add / commit）…" : "正在准备提交（git add）…") else { return }
         defer { end() }
 
         var outputs: [GitOutput] = []
@@ -306,6 +352,7 @@ final class AppModel {
                 cwd: cwd
             )
             outputs.append(contentsOf: restored)
+            guard !cancelRequested else { return }
             if let failed = restored.last, failed.exitCode != 0 {
                 present(action: "提交", outputs: outputs)
                 await refresh(alertOnFailure: false)
@@ -315,14 +362,17 @@ final class AppModel {
 
         let added = await GitClient.runBatched(base: ["add", "--"], paths: selected.map(\.path), cwd: cwd)
         outputs.append(contentsOf: added)
+        guard !cancelRequested else { return }
         if let failed = added.last, failed.exitCode != 0 {
             present(action: "提交", outputs: outputs)
             await refresh(alertOnFailure: false)
             return
         }
 
+        busyLabel = finishingMerge ? "正在完成合并（git commit）…" : "正在提交（git commit）…"
         let committed = await GitClient.run(args: ["commit", "-m", message], cwd: cwd)
         outputs.append(committed)
+        guard !cancelRequested else { return }
         guard committed.exitCode == 0 else {
             present(action: "提交", outputs: outputs)
             await refresh(alertOnFailure: false)
@@ -334,9 +384,10 @@ final class AppModel {
     }
 
     func fetch() async {
-        guard let cwd = repositoryURL, begin("正在获取…") else { return }
+        guard let cwd = repositoryURL, begin("正在检查远程（git remote）…") else { return }
         defer { end() }
         let remotes = await GitClient.run(args: ["remote"], cwd: cwd)
+        guard !cancelRequested else { return }
         guard remotes.exitCode == 0 else {
             present(action: "获取", outputs: [remotes])
             return
@@ -345,7 +396,9 @@ final class AppModel {
             present(title: "获取失败", reason: "该仓库没有远程。", log: FailureLog.make(outputs: [remotes]))
             return
         }
-        let output = await GitClient.run(args: ["fetch", "--prune"], cwd: cwd)
+        busyLabel = "正在获取（git fetch）…"
+        let output = await GitClient.run(args: ["fetch", "--prune"], cwd: cwd, timeout: 120)
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "获取", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -356,9 +409,10 @@ final class AppModel {
     }
 
     func pull() async {
-        guard let cwd = repositoryURL, begin("正在拉取…") else { return }
+        guard let cwd = repositoryURL, begin("正在拉取（git pull）…") else { return }
         defer { end() }
-        let output = await GitClient.run(args: ["pull"], cwd: cwd)
+        let output = await GitClient.run(args: ["pull"], cwd: cwd, timeout: 120)
+        guard !cancelRequested else { return }
         let text = output.stdoutText + "\n" + output.stderrText
         if output.exitCode == 0 {
             if text.localizedCaseInsensitiveContains("Already up to date") {
@@ -375,7 +429,7 @@ final class AppModel {
     }
 
     func push() async {
-        guard let cwd = repositoryURL, begin("正在推送…") else { return }
+        guard let cwd = repositoryURL, begin("正在检查上游（git rev-parse）…") else { return }
         defer { end() }
         guard let branch = currentBranchName, !isDetached else {
             present(title: "推送失败", reason: "当前不在分支上，无法推送。", log: "未执行 git push。")
@@ -385,11 +439,14 @@ final class AppModel {
             args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
             cwd: cwd
         )
+        guard !cancelRequested else { return }
         let output: GitOutput
         if upstream.exitCode == 0 {
-            output = await GitClient.run(args: ["push"], cwd: cwd)
+            busyLabel = "正在推送（git push）…"
+            output = await GitClient.run(args: ["push"], cwd: cwd, timeout: 120)
         } else {
             let remotes = await GitClient.run(args: ["remote"], cwd: cwd)
+            guard !cancelRequested else { return }
             let names = remotes.stdoutText.split(separator: "\n").map {
                 $0.trimmingCharacters(in: .whitespacesAndNewlines)
             }
@@ -397,8 +454,14 @@ final class AppModel {
                 present(title: "推送失败", reason: "无法推送：没有名为 origin 的远程。", log: FailureLog.make(outputs: [remotes]))
                 return
             }
-            output = await GitClient.run(args: ["push", "-u", "origin", branch], cwd: cwd)
+            busyLabel = "正在推送并设置上游（git push -u）…"
+            output = await GitClient.run(
+                args: ["push", "-u", "origin", branch],
+                cwd: cwd,
+                timeout: 120
+            )
         }
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "推送", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -409,7 +472,7 @@ final class AppModel {
     }
 
     func discard(_ file: FileChange) async {
-        guard let cwd = repositoryURL, begin("正在放弃修改…") else { return }
+        guard let cwd = repositoryURL, begin("正在放弃修改（git restore）…") else { return }
         defer { end() }
         if file.kind == .untracked {
             let url = cwd.appendingPathComponent(file.path)
@@ -431,6 +494,7 @@ final class AppModel {
             args: ["restore", "--source=HEAD", "--worktree", "--staged", "--"] + paths,
             cwd: cwd
         )
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "放弃修改", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -457,9 +521,10 @@ final class AppModel {
     }
 
     func removeFromIndex(_ file: FileChange) async {
-        guard let cwd = repositoryURL, begin("正在忽略文件…") else { return }
+        guard let cwd = repositoryURL, begin("正在忽略文件（git rm --cached）…") else { return }
         defer { end() }
         let output = await GitClient.run(args: ["rm", "--cached", "--", file.path], cwd: cwd)
+        guard !cancelRequested else { return }
         guard output.exitCode == 0 else {
             present(action: "忽略文件", outputs: [output])
             await refresh(alertOnFailure: false)
@@ -502,8 +567,37 @@ final class AppModel {
         return FileManager.default.fileExists(atPath: cwd.appendingPathComponent(file.path).path)
     }
 
+    private func loadRepository(folder: URL, silentIfInvalid: Bool) async {
+        guard beginRepositoryLoad() else { return }
+        defer { endRepositoryLoad() }
+        await open(folder: folder, silentIfInvalid: silentIfInvalid)
+    }
+
+    private func startLoadingRepository(folder: URL, silentIfInvalid: Bool) {
+        guard beginRepositoryLoad() else { return }
+        Task {
+            defer { endRepositoryLoad() }
+            await open(folder: folder, silentIfInvalid: silentIfInvalid)
+        }
+    }
+
+    private func beginRepositoryLoad() -> Bool {
+        guard !isWorking else { return false }
+        cancelRequested = false
+        isRefreshing = true
+        refreshLabel = "正在打开项目（git rev-parse）…"
+        return true
+    }
+
+    private func endRepositoryLoad() {
+        isRefreshing = false
+        refreshLabel = ""
+        cancelRequested = false
+    }
+
     private func open(folder: URL, silentIfInvalid: Bool) async {
         let probe = await GitClient.run(args: ["rev-parse", "--show-toplevel"], cwd: folder)
+        guard !cancelRequested else { return }
         let top = probe.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard probe.exitCode == 0, !top.isEmpty else {
             if !silentIfInvalid {
@@ -512,17 +606,23 @@ final class AppModel {
             return
         }
         if repositoryPath != top {
+            generation += 1
             resetWorkspace()
         }
         repositoryPath = top
         RecentsStore.setLastRepository(top)
+        recentRepositoryPaths = RecentsStore.recentRepositories()
         recentBranchNames = RecentsStore.recentBranches(for: top)
+        refreshLabel = "正在刷新（git status / log）…"
         await refresh(alertOnFailure: !silentIfInvalid, updateDivergence: true)
     }
 
     private func refresh(alertOnFailure: Bool, updateDivergence: Bool = false) async {
         guard let cwd = repositoryURL else { return }
         let gen = generation
+        if isRefreshing {
+            refreshLabel = "正在读取状态和分支（git status / branch）…"
+        }
 
         async let status = GitClient.run(args: ["status", "--porcelain=v1", "-z", "-uall"], cwd: cwd)
         async let showCurrent = GitClient.run(args: ["branch", "--show-current"], cwd: cwd)
@@ -543,6 +643,7 @@ final class AppModel {
         let remoteOut = await remotes
         let headOut = await head
         let mergeOut = await mergeHead
+        guard !cancelRequested else { return }
         guard gen == generation else { return }
 
         guard statusOut.exitCode == 0 else {
@@ -584,7 +685,11 @@ final class AppModel {
         }
 
         if updateDivergence {
+            if isRefreshing {
+                refreshLabel = "正在计算待推送和待拉取提交…"
+            }
             await updateDivergenceCounts(cwd: cwd, generation: gen)
+            guard !cancelRequested else { return }
         } else if currentBranchName != previousBranch || isDetached != wasDetached {
             unpushedCount = nil
             remoteAheadCount = nil
@@ -594,10 +699,18 @@ final class AppModel {
         let merging = mergeOut.exitCode == 0 && !mergeOut.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         mergeInProgress = merging
         mergeSource = merging ? await readMergeSource(cwd: cwd) : ""
+        guard !cancelRequested else { return }
         guard gen == generation else { return }
 
+        if isRefreshing {
+            refreshLabel = "正在读取提交历史（git log）…"
+        }
         await loadHistory(reset: true, alertOnFailure: false, generation: gen)
+        guard !cancelRequested else { return }
         guard gen == generation else { return }
+        if isRefreshing, selectedPath != nil || selectedHistoryPath != nil {
+            refreshLabel = "正在加载文件差异（git diff）…"
+        }
         await reloadVisibleDiff()
     }
 
@@ -612,6 +725,7 @@ final class AppModel {
             args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
             cwd: cwd
         )
+        guard !cancelRequested else { return }
         guard gen == generation else { return }
 
         let configuredUpstream = upstreamOutput.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -644,6 +758,7 @@ final class AppModel {
         )
         let local = await unpushedOutput
         let remote = await remoteAheadOutput
+        guard !cancelRequested else { return }
         guard gen == generation else { return }
 
         guard local.exitCode == 0,
@@ -669,6 +784,7 @@ final class AppModel {
             ],
             cwd: cwd
         )
+        guard !cancelRequested else { return }
         guard token == generation else { return }
         if output.exitCode != 0 {
             let blob = output.stderrText + output.stdoutText
@@ -745,6 +861,7 @@ final class AppModel {
                 allowed = [0, 1]
             }
         }
+        guard !cancelRequested else { return }
         guard token == diffToken, selectedPath == path else { return }
         guard allowed.contains(output.exitCode) else {
             diff = .empty
@@ -764,6 +881,7 @@ final class AppModel {
             args: ["show", "--no-ext-diff", "--no-color", hash, "--", path],
             cwd: cwd
         )
+        guard !cancelRequested else { return }
         guard token == diffToken, selectedHistoryHash == hash, selectedHistoryPath == path else { return }
         guard output.exitCode == 0 else {
             present(action: "刷新", outputs: [output])
@@ -792,8 +910,27 @@ final class AppModel {
         }
     }
 
+    private func startRefresh(
+        label: String,
+        operation: @escaping @MainActor () async -> Void
+    ) {
+        guard !isWorking else { return }
+        cancelRequested = false
+        isRefreshing = true
+        refreshLabel = label
+        Task {
+            defer {
+                isRefreshing = false
+                refreshLabel = ""
+                cancelRequested = false
+            }
+            await operation()
+        }
+    }
+
     private func begin(_ label: String) -> Bool {
-        guard !isBusy else { return false }
+        guard !isWorking else { return false }
+        cancelRequested = false
         isBusy = true
         busyLabel = label
         generation += 1
@@ -803,6 +940,7 @@ final class AppModel {
     private func end() {
         isBusy = false
         busyLabel = ""
+        cancelRequested = false
     }
 
     private func showBanner(_ text: String) {

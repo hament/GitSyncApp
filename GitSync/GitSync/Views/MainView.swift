@@ -85,7 +85,7 @@ struct MainView: View {
             Button("中止合并") {
                 model.dialog = .abortMerge
             }
-            .disabled(model.isBusy)
+            .disabled(model.isWorking)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -101,8 +101,20 @@ struct MainView: View {
                 .font(.title3)
             Text("打开文件夹后，可以查看分支、变更和提交历史。")
                 .foregroundStyle(.secondary)
-            Button("选择项目") { model.chooseRepository() }
-                .keyboardShortcut(.defaultAction)
+            if model.isRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(model.refreshLabel)
+                        .foregroundStyle(.secondary)
+                    Button("取消") {
+                        model.cancelCurrentOperation()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else {
+                ProjectMenu(model: model)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

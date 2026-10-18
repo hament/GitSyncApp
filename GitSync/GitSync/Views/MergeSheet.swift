@@ -35,7 +35,7 @@ struct MergeSheet: View {
                     guard let selection else { return }
                     model.askMerge(selection.name)
                 }
-                .disabled(selection == nil || model.isBusy)
+                .disabled(selection == nil || model.isWorking)
                 .keyboardShortcut(.defaultAction)
             }
         }

@@ -4,82 +4,98 @@ struct ToolbarView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button("选择项目") { model.chooseRepository() }
-                .disabled(model.isBusy)
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                ProjectMenu(model: model)
+                BranchMenu(model: model)
 
-            Text(model.repositoryPath ?? "")
-                .font(.system(.body, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(model.repositoryPath ?? "")
-                .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(-1)
+                Spacer(minLength: 12)
 
-            if model.isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                Text(model.busyLabel)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else if let banner = model.banner {
-                Text(banner)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if model.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(model.isBusy ? model.busyLabel : model.refreshLabel)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Button("取消") {
+                        model.cancelCurrentOperation()
+                    }
+                    .buttonStyle(.borderless)
+                } else if let banner = model.banner {
+                    Text(banner)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 7) {
+                    ToolbarActionButton(
+                        title: "刷新",
+                        systemImage: "arrow.clockwise",
+                        tint: .secondary,
+                        isDisabled: model.isWorking,
+                        help: "重新读取仓库状态和提交数"
+                    ) {
+                        model.refreshNow()
+                    }
+
+                    ToolbarActionButton(
+                        title: "Fetch",
+                        systemImage: "arrow.down.circle",
+                        tint: .blue,
+                        isDisabled: model.isWorking,
+                        help: "获取远程更新"
+                    ) {
+                        Task { await model.fetch() }
+                    }
+
+                    ToolbarActionButton(
+                        title: "Pull",
+                        systemImage: "arrow.down.to.line",
+                        tint: .indigo,
+                        badge: model.remoteAheadCount,
+                        isDisabled: model.isWorking,
+                        help: pullHelp
+                    ) {
+                        Task { await model.pull() }
+                    }
+
+                    ToolbarActionButton(
+                        title: "Push",
+                        systemImage: "arrow.up.to.line",
+                        tint: .green,
+                        badge: model.unpushedCount,
+                        isDisabled: model.isWorking,
+                        help: pushHelp
+                    ) {
+                        Task { await model.push() }
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
-            BranchMenu(model: model)
+            Divider()
 
             HStack(spacing: 7) {
-                ToolbarActionButton(
-                    title: "刷新",
-                    systemImage: "arrow.clockwise",
-                    tint: .secondary,
-                    isDisabled: model.isBusy,
-                    help: "重新读取仓库状态和提交数"
-                ) {
-                    model.refreshNow()
-                }
-
-                ToolbarActionButton(
-                    title: "Fetch",
-                    systemImage: "arrow.down.circle",
-                    tint: .blue,
-                    isDisabled: model.isBusy,
-                    help: "获取远程更新"
-                ) {
-                    Task { await model.fetch() }
-                }
-
-                ToolbarActionButton(
-                    title: "Pull",
-                    systemImage: "arrow.down.to.line",
-                    tint: .indigo,
-                    badge: model.remoteAheadCount,
-                    isDisabled: model.isBusy,
-                    help: pullHelp
-                ) {
-                    Task { await model.pull() }
-                }
-
-                ToolbarActionButton(
-                    title: "Push",
-                    systemImage: "arrow.up.to.line",
-                    tint: .green,
-                    badge: model.unpushedCount,
-                    isDisabled: model.isBusy,
-                    help: pushHelp
-                ) {
-                    Task { await model.push() }
-                }
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text("项目路径")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(model.repositoryPath ?? "")
+                    .font(.system(.callout, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .help(model.repositoryPath ?? "")
+                Spacer(minLength: 0)
             }
-            .fixedSize(horizontal: true, vertical: false)
-            .layoutPriority(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.025))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
     }
 
     private var pullHelp: String {
@@ -94,6 +110,47 @@ struct ToolbarView: View {
             return "推送本地提交；当前分支没有可比较的远程分支"
         }
         return count == 0 ? "推送本地提交；没有未推送的提交" : "推送本地提交；有 \(count) 个提交尚未推送"
+    }
+}
+
+struct ProjectMenu: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Menu {
+            Button {
+                model.chooseRepository()
+            } label: {
+                Label("选择本机文件夹…", systemImage: "folder.badge.plus")
+            }
+
+            if !model.recentRepositoryPaths.isEmpty {
+                Divider()
+                Section("最近项目") {
+                    ForEach(model.recentRepositoryPaths, id: \.self) { path in
+                        Button {
+                            model.openRecentRepository(path)
+                        } label: {
+                            Label(recentProjectTitle(path), systemImage: recentProjectIcon(path))
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("选择项目", systemImage: "folder")
+        }
+        .disabled(model.isWorking)
+        .fixedSize()
+        .help("选择本机 Git 仓库，或打开最近使用的项目")
+    }
+
+    private func recentProjectTitle(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        return "\(url.lastPathComponent) — \(path)"
+    }
+
+    private func recentProjectIcon(_ path: String) -> String {
+        path == model.repositoryPath ? "checkmark.circle.fill" : "clock.arrow.circlepath"
     }
 }
 

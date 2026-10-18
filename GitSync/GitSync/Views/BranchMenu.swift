@@ -16,7 +16,7 @@ struct BranchMenu: View {
                     .font(.caption)
             }
         }
-        .disabled(model.isBusy || model.repositoryPath == nil)
+        .disabled(model.isWorking || model.repositoryPath == nil)
         .popover(isPresented: $shown, arrowEdge: .bottom) {
             BranchPanel(model: model) { shown = false }
         }
@@ -57,12 +57,12 @@ private struct BranchPanel: View {
                     dismiss()
                     model.presentNewBranch()
                 }
-                .disabled(model.isBusy)
+                .disabled(model.isWorking)
                 Button("合并到当前分支…") {
                     dismiss()
                     model.presentMergePicker()
                 }
-                .disabled(model.isBusy || model.isDetached)
+                .disabled(model.isWorking || model.isDetached)
                 if model.isDetached {
                     Text("请先创建或切换到一个分支")
                         .font(.caption)
@@ -139,6 +139,6 @@ private struct BranchPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isCurrent || model.isBusy)
+        .disabled(isCurrent || model.isWorking)
     }
 }
