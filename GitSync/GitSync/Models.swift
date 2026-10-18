@@ -43,6 +43,8 @@ nonisolated struct BranchItem: Identifiable, Hashable, Sendable {
 
 nonisolated struct CommitRecord: Identifiable, Hashable, Sendable {
     var hash: String
+    var parentHashes: [String] = []
+    var references: [String] = []
     var authorName: String
     var authorEmail: String
     var date: Date
@@ -50,6 +52,80 @@ nonisolated struct CommitRecord: Identifiable, Hashable, Sendable {
     var id: String { hash }
 
     var shortHash: String { String(hash.prefix(7)) }
+    var isMerge: Bool { parentHashes.count > 1 }
+}
+
+nonisolated enum HistoryScope: String, CaseIterable, Hashable, Sendable {
+    case current
+    case mainline
+    case all
+
+    var title: String {
+        switch self {
+        case .current: "当前分支"
+        case .mainline: "主线"
+        case .all: "所有分支"
+        }
+    }
+}
+
+nonisolated struct CommitGraphEdge: Hashable, Sendable {
+    var fromLane: Int
+    var toLane: Int
+}
+
+nonisolated struct CommitGraphRow: Hashable, Sendable {
+    var nodeLane: Int
+    var laneCount: Int
+    var throughEdges: [CommitGraphEdge]
+    var parentLanes: [Int]
+}
+
+nonisolated enum CommitGraphLayout {
+    static func build(_ commits: [CommitRecord]) -> [String: CommitGraphRow] {
+        var lanes: [String] = []
+        var rows: [String: CommitGraphRow] = [:]
+
+        for commit in commits {
+            let nodeLane: Int
+            if let existing = lanes.firstIndex(of: commit.hash) {
+                nodeLane = existing
+            } else {
+                lanes.append(commit.hash)
+                nodeLane = lanes.count - 1
+            }
+
+            let topLanes = lanes
+            var bottomLanes = lanes
+            bottomLanes.remove(at: nodeLane)
+
+            var insertionIndex = nodeLane
+            for parent in commit.parentHashes {
+                if !bottomLanes.contains(parent) {
+                    let index = min(insertionIndex, bottomLanes.count)
+                    bottomLanes.insert(parent, at: index)
+                    insertionIndex = index + 1
+                }
+            }
+
+            let throughEdges = topLanes.enumerated().compactMap { topIndex, hash -> CommitGraphEdge? in
+                guard hash != commit.hash,
+                      let bottomIndex = bottomLanes.firstIndex(of: hash) else {
+                    return nil
+                }
+                return CommitGraphEdge(fromLane: topIndex, toLane: bottomIndex)
+            }
+            let parentLanes = commit.parentHashes.compactMap { bottomLanes.firstIndex(of: $0) }
+            rows[commit.hash] = CommitGraphRow(
+                nodeLane: nodeLane,
+                laneCount: max(topLanes.count, bottomLanes.count, 1),
+                throughEdges: throughEdges,
+                parentLanes: parentLanes
+            )
+            lanes = bottomLanes
+        }
+        return rows
+    }
 }
 
 nonisolated struct CommitFile: Identifiable, Hashable, Sendable {

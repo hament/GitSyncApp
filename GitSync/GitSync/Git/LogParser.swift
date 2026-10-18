@@ -6,15 +6,43 @@ enum LogParser {
             let fields = record.split(separator: "\u{1f}", omittingEmptySubsequences: false).map(String.init)
             guard fields.count >= 5 else { return nil }
             let hash = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !hash.isEmpty, let seconds = TimeInterval(fields[3]) else { return nil }
+            let usesGraphFields = fields.count >= 7
+            let authorIndex = usesGraphFields ? 3 : 1
+            let emailIndex = usesGraphFields ? 4 : 2
+            let dateIndex = usesGraphFields ? 5 : 3
+            let subjectIndex = usesGraphFields ? 6 : 4
+            guard !hash.isEmpty, let seconds = TimeInterval(fields[dateIndex]) else { return nil }
             return CommitRecord(
                 hash: hash,
-                authorName: fields[1],
-                authorEmail: fields[2],
+                parentHashes: usesGraphFields
+                    ? fields[1].split(separator: " ").map(String.init)
+                    : [],
+                references: usesGraphFields ? parseReferences(fields[2]) : [],
+                authorName: fields[authorIndex],
+                authorEmail: fields[emailIndex],
                 date: Date(timeIntervalSince1970: seconds),
-                subject: fields[4].trimmingCharacters(in: .newlines)
+                subject: fields[subjectIndex].trimmingCharacters(in: .newlines)
             )
         }
+    }
+
+    private static func parseReferences(_ decorations: String) -> [String] {
+        var references: [String] = []
+        for raw in decorations.split(separator: ",") {
+            let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.hasPrefix("HEAD -> ") {
+                references.append("HEAD")
+                references.append(String(value.dropFirst("HEAD -> ".count)))
+            } else if value.hasSuffix("/HEAD") || value.contains("/HEAD -> ") {
+                continue
+            } else if value.hasPrefix("tag: ") {
+                references.append(String(value.dropFirst("tag: ".count)))
+            } else if !value.isEmpty {
+                references.append(value)
+            }
+        }
+        var seen = Set<String>()
+        return references.filter { seen.insert($0).inserted }
     }
 
     static func parseNameStatus(_ data: Data) -> [CommitFile] {
@@ -54,8 +82,19 @@ enum LogParser {
 
     static func parseRemoteBranches(_ text: String) -> [String] {
         text.split(separator: "\n", omittingEmptySubsequences: true)
-            .map(String.init)
-            .filter { !$0.isEmpty && !$0.hasSuffix("/HEAD") }
+            .compactMap { line -> String? in
+                let fields = line.split(
+                    separator: "\t",
+                    maxSplits: 1,
+                    omittingEmptySubsequences: false
+                )
+                guard let first = fields.first,
+                      fields.count == 1 || fields[1].isEmpty else {
+                    return nil
+                }
+                let name = String(first)
+                return name.isEmpty || name.hasSuffix("/HEAD") ? nil : name
+            }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 

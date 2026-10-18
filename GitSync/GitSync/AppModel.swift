@@ -20,11 +20,13 @@ final class AppModel {
     var selectedPath: String?
 
     var mode: SidebarMode = .changes
+    var historyScope: HistoryScope = .current
     var commits: [CommitRecord] = []
     var canLoadMoreHistory = false
     var selectedCommitHash: String?
     var loadingCommitHash: String?
     var commitFiles: [String: [CommitFile]] = [:]
+    var commitBranches: [String: [String]] = [:]
     var selectedHistoryHash: String?
     var selectedHistoryPath: String?
 
@@ -99,6 +101,15 @@ final class AppModel {
     var selectedCommitFiles: [CommitFile] {
         guard let selectedCommitHash else { return [] }
         return commitFiles[selectedCommitHash] ?? []
+    }
+
+    var selectedCommitBranches: [String] {
+        guard let selectedCommitHash else { return [] }
+        return commitBranches[selectedCommitHash] ?? []
+    }
+
+    var commitGraphRows: [String: CommitGraphRow] {
+        CommitGraphLayout.build(commits)
     }
 
     func chooseRepository() {
@@ -210,19 +221,27 @@ final class AppModel {
         }
     }
 
+    func setHistoryScope(_ scope: HistoryScope) {
+        guard historyScope != scope, !isWorking else { return }
+        historyScope = scope
+        commits = []
+        canLoadMoreHistory = false
+        selectedCommitHash = nil
+        selectedHistoryHash = nil
+        selectedHistoryPath = nil
+        diff = .empty
+        diffTitle = ""
+        startRefresh(label: "正在读取\(scope.title)历史（git log）…") {
+            await self.loadHistory(reset: true, alertOnFailure: true)
+        }
+    }
+
     func selectCommit(_ hash: String) async {
         selectedCommitHash = hash
         selectedHistoryHash = hash
         selectedHistoryPath = nil
         diff = .empty
         diffTitle = ""
-
-        if let files = commitFiles[hash] {
-            if let first = files.first {
-                selectHistoryFile(hash: hash, path: first.path)
-            }
-            return
-        }
 
         guard let cwd = repositoryURL else { return }
         loadingCommitHash = hash
@@ -231,19 +250,59 @@ final class AppModel {
                 loadingCommitHash = nil
             }
         }
-        let output = await GitClient.run(
-            args: ["show", "--first-parent", "-z", "--name-status", "--pretty=format:", hash],
-            cwd: cwd
-        )
-        guard selectedCommitHash == hash else { return }
-        guard output.exitCode == 0 else {
-            present(action: "刷新", outputs: [output])
-            return
+
+        let fileTask: Task<GitOutput, Never>? = commitFiles[hash] == nil
+            ? Task {
+                await GitClient.run(
+                    args: ["show", "--first-parent", "-z", "--name-status", "--pretty=format:", hash],
+                    cwd: cwd
+                )
+            }
+            : nil
+        let branchesTask: Task<GitOutput, Never>? = commitBranches[hash] == nil
+            ? Task {
+                await GitClient.run(
+                    args: [
+                        "for-each-ref", "--format=%(refname:short)%09%(symref)",
+                        "--contains", hash, "refs/heads", "refs/remotes",
+                    ],
+                    cwd: cwd
+                )
+            }
+            : nil
+
+        if let output = await fileTask?.value {
+            if output.exitCode == 0 {
+                var loaded = commitFiles
+                loaded[hash] = LogParser.parseNameStatus(output.stdout)
+                commitFiles = loaded
+            } else if selectedCommitHash == hash {
+                present(action: "刷新", outputs: [output])
+                return
+            }
         }
-        var loaded = commitFiles
-        loaded[hash] = LogParser.parseNameStatus(output.stdout)
-        commitFiles = loaded
-        if let first = loaded[hash]?.first {
+
+        if let output = await branchesTask?.value, output.exitCode == 0 {
+            var loaded = commitBranches
+            loaded[hash] = output.stdoutText
+                .split(separator: "\n")
+                .compactMap { line -> String? in
+                    let fields = line.split(
+                        separator: "\t",
+                        maxSplits: 1,
+                        omittingEmptySubsequences: false
+                    )
+                    guard let name = fields.first, fields.count == 1 || fields[1].isEmpty else {
+                        return nil
+                    }
+                    return String(name)
+                }
+                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            commitBranches = loaded
+        }
+
+        guard selectedCommitHash == hash else { return }
+        if let first = commitFiles[hash]?.first {
             selectHistoryFile(hash: hash, path: first.path)
         }
     }
@@ -670,7 +729,9 @@ final class AppModel {
             cwd: cwd
         )
         async let remotes = GitClient.run(
-            args: ["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+            args: [
+                "for-each-ref", "--format=%(refname:short)%09%(symref)", "refs/remotes",
+            ],
             cwd: cwd
         )
         async let head = GitClient.run(args: ["rev-parse", "--short=7", "HEAD"], cwd: cwd)
@@ -816,11 +877,21 @@ final class AppModel {
         guard let cwd = repositoryURL else { return }
         let token = gen ?? generation
         let skip = reset ? 0 : commits.count
+        var arguments = ["log"]
+        switch historyScope {
+        case .current:
+            break
+        case .mainline:
+            arguments.append("--first-parent")
+        case .all:
+            arguments.append(contentsOf: ["--all", "--topo-order", "--date-order"])
+        }
+        arguments.append(contentsOf: [
+            "-n", "100", "--skip", "\(skip)",
+            "--pretty=format:%H%x1f%P%x1f%D%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
+        ])
         let output = await GitClient.run(
-            args: [
-                "log", "-n", "100", "--skip", "\(skip)",
-                "--pretty=format:%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
-            ],
+            args: arguments,
             cwd: cwd
         )
         guard !cancelRequested else { return }
@@ -1027,6 +1098,7 @@ final class AppModel {
         selectedCommitHash = nil
         loadingCommitHash = nil
         commitFiles = [:]
+        commitBranches = [:]
         selectedHistoryHash = nil
         selectedHistoryPath = nil
         diff = .empty

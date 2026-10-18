@@ -43,6 +43,35 @@ struct CommitFilesView: View {
                     .textSelection(.enabled)
             }
             .foregroundStyle(.secondary)
+
+            if !model.selectedCommitBranches.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("包含此提交的分支")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 5) {
+                            ForEach(model.selectedCommitBranches, id: \.self) { branch in
+                                let isRemote = model.remoteBranchNames.contains(branch)
+                                Label(
+                                    branch,
+                                    systemImage: isRemote
+                                        ? "network"
+                                        : "arrow.triangle.branch"
+                                )
+                                .font(.system(size: 9, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .foregroundStyle(isRemote ? Color.purple : Color.green)
+                                .background(
+                                    (isRemote ? Color.purple : Color.green).opacity(0.12),
+                                    in: Capsule()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
