@@ -6,6 +6,8 @@ import SwiftUI
 final class AppModel {
     var repositoryPath: String?
     var branchDisplayName = ""
+    var unpushedCount: Int?
+    var remoteAheadCount: Int?
     var currentBranchName: String?
     var isDetached = false
     var localBranchNames: [String] = []
@@ -97,7 +99,7 @@ final class AppModel {
 
     func refreshNow() {
         guard !isBusy else { return }
-        Task { await refresh(alertOnFailure: true) }
+        Task { await refresh(alertOnFailure: true, updateDivergence: true) }
     }
 
     func refreshIfIdle() {
@@ -515,10 +517,10 @@ final class AppModel {
         repositoryPath = top
         RecentsStore.setLastRepository(top)
         recentBranchNames = RecentsStore.recentBranches(for: top)
-        await refresh(alertOnFailure: !silentIfInvalid)
+        await refresh(alertOnFailure: !silentIfInvalid, updateDivergence: true)
     }
 
-    private func refresh(alertOnFailure: Bool) async {
+    private func refresh(alertOnFailure: Bool, updateDivergence: Bool = false) async {
         guard let cwd = repositoryURL else { return }
         let gen = generation
 
@@ -564,6 +566,8 @@ final class AppModel {
             }
         }
 
+        let previousBranch = currentBranchName
+        let wasDetached = isDetached
         if !current.isEmpty {
             isDetached = false
             currentBranchName = current
@@ -579,6 +583,14 @@ final class AppModel {
             branchDisplayName = "尚无提交"
         }
 
+        if updateDivergence {
+            await updateDivergenceCounts(cwd: cwd, generation: gen)
+        } else if currentBranchName != previousBranch || isDetached != wasDetached {
+            unpushedCount = nil
+            remoteAheadCount = nil
+        }
+        guard gen == generation else { return }
+
         let merging = mergeOut.exitCode == 0 && !mergeOut.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         mergeInProgress = merging
         mergeSource = merging ? await readMergeSource(cwd: cwd) : ""
@@ -587,6 +599,30 @@ final class AppModel {
         await loadHistory(reset: true, alertOnFailure: false, generation: gen)
         guard gen == generation else { return }
         await reloadVisibleDiff()
+    }
+
+    private func updateDivergenceCounts(cwd: URL, generation gen: Int) async {
+        guard !isDetached, currentBranchName != nil else {
+            unpushedCount = nil
+            remoteAheadCount = nil
+            return
+        }
+        let output = await GitClient.run(
+            args: ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+            cwd: cwd
+        )
+        guard gen == generation else { return }
+        let fields = output.stdoutText.split { $0 == "\t" || $0.isWhitespace }
+        guard output.exitCode == 0,
+              fields.count >= 2,
+              let unpushed = Int(fields[0]),
+              let remoteAhead = Int(fields[1]) else {
+            unpushedCount = nil
+            remoteAheadCount = nil
+            return
+        }
+        unpushedCount = unpushed
+        remoteAheadCount = remoteAhead
     }
 
     private func loadHistory(reset: Bool, alertOnFailure: Bool, generation gen: Int? = nil) async {
@@ -781,6 +817,8 @@ final class AppModel {
         recentBranchNames = []
         currentBranchName = nil
         branchDisplayName = ""
+        unpushedCount = nil
+        remoteAheadCount = nil
         isDetached = false
     }
 }
