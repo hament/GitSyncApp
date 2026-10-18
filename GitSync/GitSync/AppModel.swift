@@ -217,7 +217,7 @@ final class AppModel {
             RecentsStore.rememberBranch(remembered, repository: repositoryPath)
         }
         showBanner("已切换到 \(remembered)")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func createBranch(named raw: String) async {
@@ -236,7 +236,7 @@ final class AppModel {
         }
         showNewBranch = false
         showBanner("已创建并切换到 \(name)")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func presentNewBranch() {
@@ -268,7 +268,7 @@ final class AppModel {
             } else {
                 showBanner("已合并 \(source)")
             }
-            await refresh(alertOnFailure: true)
+            await refresh(alertOnFailure: true, updateDivergence: true)
             return
         }
         await refresh(alertOnFailure: false)
@@ -286,7 +286,7 @@ final class AppModel {
             return
         }
         showBanner("已中止合并")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func commit() async {
@@ -330,7 +330,7 @@ final class AppModel {
         }
         commitMessage = ""
         showBanner(finishingMerge ? "已完成合并" : "已提交")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func fetch() async {
@@ -352,7 +352,7 @@ final class AppModel {
             return
         }
         showBanner("已获取")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func pull() async {
@@ -366,10 +366,10 @@ final class AppModel {
             } else {
                 showBanner("已拉取")
             }
-            await refresh(alertOnFailure: true)
+            await refresh(alertOnFailure: true, updateDivergence: true)
             return
         }
-        await refresh(alertOnFailure: false)
+        await refresh(alertOnFailure: false, updateDivergence: true)
         let conflict = mergeInProgress || text.localizedCaseInsensitiveContains("CONFLICT") || text.localizedCaseInsensitiveContains("fix conflicts")
         present(action: "拉取", outputs: [output], conflict: conflict)
     }
@@ -405,7 +405,7 @@ final class AppModel {
             return
         }
         showBanner("已推送")
-        await refresh(alertOnFailure: true)
+        await refresh(alertOnFailure: true, updateDivergence: true)
     }
 
     func discard(_ file: FileChange) async {
@@ -602,21 +602,54 @@ final class AppModel {
     }
 
     private func updateDivergenceCounts(cwd: URL, generation gen: Int) async {
-        guard !isDetached, currentBranchName != nil else {
+        guard !isDetached, let currentBranchName else {
             unpushedCount = nil
             remoteAheadCount = nil
             return
         }
-        let output = await GitClient.run(
-            args: ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+
+        let upstreamOutput = await GitClient.run(
+            args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
             cwd: cwd
         )
         guard gen == generation else { return }
-        let fields = output.stdoutText.split { $0 == "\t" || $0.isWhitespace }
-        guard output.exitCode == 0,
-              fields.count >= 2,
-              let unpushed = Int(fields[0]),
-              let remoteAhead = Int(fields[1]) else {
+
+        let configuredUpstream = upstreamOutput.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let comparisonRef: String?
+        if upstreamOutput.exitCode == 0, !configuredUpstream.isEmpty {
+            comparisonRef = configuredUpstream
+        } else {
+            let originCandidate = "origin/\(currentBranchName)"
+            if remoteBranchNames.contains(originCandidate) {
+                comparisonRef = originCandidate
+            } else {
+                let matching = remoteBranchNames.filter { $0.hasSuffix("/\(currentBranchName)") }
+                comparisonRef = matching.count == 1 ? matching[0] : nil
+            }
+        }
+
+        guard let comparisonRef else {
+            unpushedCount = nil
+            remoteAheadCount = nil
+            return
+        }
+
+        async let unpushedOutput = GitClient.run(
+            args: ["rev-list", "--count", "\(comparisonRef)..HEAD"],
+            cwd: cwd
+        )
+        async let remoteAheadOutput = GitClient.run(
+            args: ["rev-list", "--count", "HEAD..\(comparisonRef)"],
+            cwd: cwd
+        )
+        let local = await unpushedOutput
+        let remote = await remoteAheadOutput
+        guard gen == generation else { return }
+
+        guard local.exitCode == 0,
+              remote.exitCode == 0,
+              let unpushed = Int(local.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let remoteAhead = Int(remote.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             unpushedCount = nil
             remoteAheadCount = nil
             return

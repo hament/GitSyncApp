@@ -4,9 +4,11 @@ struct ToolbarView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Button("选择项目") { model.chooseRepository() }
                 .disabled(model.isBusy)
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
 
             Text(model.repositoryPath ?? "")
                 .font(.system(.body, design: .monospaced))
@@ -29,36 +31,121 @@ struct ToolbarView: View {
 
             BranchMenu(model: model)
 
-            divergenceCounts
+            HStack(spacing: 7) {
+                ToolbarActionButton(
+                    title: "刷新",
+                    systemImage: "arrow.clockwise",
+                    tint: .secondary,
+                    isDisabled: model.isBusy,
+                    help: "重新读取仓库状态和提交数"
+                ) {
+                    model.refreshNow()
+                }
 
-            Button("刷新") { model.refreshNow() }
-                .disabled(model.isBusy)
-            Button("Fetch") { Task { await model.fetch() } }
-                .disabled(model.isBusy)
-            Button("Pull") { Task { await model.pull() } }
-                .disabled(model.isBusy)
-            Button("Push") { Task { await model.push() } }
-                .disabled(model.isBusy)
+                ToolbarActionButton(
+                    title: "Fetch",
+                    systemImage: "arrow.down.circle",
+                    tint: .blue,
+                    isDisabled: model.isBusy,
+                    help: "获取远程更新"
+                ) {
+                    Task { await model.fetch() }
+                }
+
+                ToolbarActionButton(
+                    title: "Pull",
+                    systemImage: "arrow.down.to.line",
+                    tint: .indigo,
+                    badge: model.remoteAheadCount,
+                    isDisabled: model.isBusy,
+                    help: pullHelp
+                ) {
+                    Task { await model.pull() }
+                }
+
+                ToolbarActionButton(
+                    title: "Push",
+                    systemImage: "arrow.up.to.line",
+                    tint: .green,
+                    badge: model.unpushedCount,
+                    isDisabled: model.isBusy,
+                    help: pushHelp
+                ) {
+                    Task { await model.push() }
+                }
+            }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
     }
 
-    private var divergenceCounts: some View {
-        HStack(spacing: 8) {
-            countLabel("未推送", model.unpushedCount)
-            countLabel("远程领先", model.remoteAheadCount)
+    private var pullHelp: String {
+        guard let count = model.remoteAheadCount else {
+            return "拉取远程提交；当前分支没有可比较的远程分支"
         }
-        .help("未推送是本地还没推到上游的提交数，远程领先是上游比本地多的提交数。启动时和点击刷新时重新计算。")
+        return count == 0 ? "拉取远程提交；远程没有领先提交" : "拉取远程提交；远程领先 \(count) 个提交"
     }
 
-    private func countLabel(_ title: String, _ count: Int?) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Text(count.map(String.init) ?? "—")
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(count == nil ? Color.secondary : Color.primary)
+    private var pushHelp: String {
+        guard let count = model.unpushedCount else {
+            return "推送本地提交；当前分支没有可比较的远程分支"
         }
+        return count == 0 ? "推送本地提交；没有未推送的提交" : "推送本地提交；有 \(count) 个提交尚未推送"
+    }
+}
+
+private struct ToolbarActionButton: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var badge: Int?
+    let isDisabled: Bool
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 10)
+                .frame(minWidth: 72, minHeight: 30)
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isDisabled ? Color.secondary : Color.primary)
+        .background {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(tint.opacity(isHovering && !isDisabled ? 0.15 : 0.08))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(tint.opacity(isHovering && !isDisabled ? 0.38 : 0.2), lineWidth: 1)
+        }
+        .overlay(alignment: .topTrailing) {
+            if let badge, badge > 0 {
+                Text(badge > 99 ? "99+" : "\(badge)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(.red, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2)
+                    }
+                    .offset(x: 7, y: -7)
+                    .accessibilityLabel("\(badge) 个提交")
+            }
+        }
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.62 : 1)
+        .help(help)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
     }
 }
