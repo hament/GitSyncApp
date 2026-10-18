@@ -46,8 +46,8 @@ struct DiffView: View {
 
     private var splitContent: some View {
         GeometryReader { geometry in
-            let paneWidth = splitPaneWidth(availableWidth: geometry.size.width)
-            ScrollView([.vertical, .horizontal]) {
+            let paneWidth = max((geometry.size.width - 1) / 2, 1)
+            ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     splitColumnHeader(paneWidth: paneWidth)
                     if model.diff.truncated {
@@ -58,7 +58,7 @@ struct DiffView: View {
                         splitRow(row, index: index, paneWidth: paneWidth)
                     }
                 }
-                .frame(minWidth: paneWidth * 2 + 1, alignment: .leading)
+                .frame(width: geometry.size.width, alignment: .leading)
                 .padding(.bottom, 8)
             }
         }
@@ -249,15 +249,6 @@ struct DiffView: View {
                     .fill(Color.primary.opacity(0.07))
                     .frame(width: 1)
             }
-    }
-
-    private func splitPaneWidth(availableWidth: CGFloat) -> CGFloat {
-        let longestLine = model.diff.lines
-            .filter { $0.kind != .hunk }
-            .map { contentText($0).count }
-            .max() ?? 0
-        let estimatedContentWidth = min(CGFloat(longestLine) * 7.25 + 90, 2_000)
-        return max((availableWidth - 1) / 2, max(360, estimatedContentWidth))
     }
 
     private var truncatedNotice: some View {

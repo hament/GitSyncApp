@@ -91,10 +91,6 @@ final class AppModel {
         isBusy || isRefreshing
     }
 
-    var showsCommitBar: Bool {
-        mode == .changes || mergeInProgress
-    }
-
     var selectedCommit: CommitRecord? {
         guard let selectedCommitHash else { return nil }
         return commits.first { $0.hash == selectedCommitHash }

@@ -56,10 +56,6 @@ struct MainView: View {
                 DiffView(model: model)
                     .frame(minWidth: 420)
             }
-            if model.showsCommitBar {
-                Divider()
-                CommitBar(model: model)
-            }
         }
     }
 
@@ -78,6 +74,9 @@ struct MainView: View {
 
             if model.mode == .changes {
                 ChangesList(model: model)
+                    .frame(maxHeight: .infinity)
+                Divider()
+                CommitBar(model: model)
             } else {
                 HistoryList(model: model)
             }
