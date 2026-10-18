@@ -1,5 +1,7 @@
 # GitSync
 
+[English](README.en.md) | 中文
+
 Mac 上的原生 Git 可视化工具App, 采用Swift开发。打开本机仓库后，可以查看文件变更、管理分支、浏览提交历史，并直接 Fetch、Pull、Push。
 
 ## 功能
