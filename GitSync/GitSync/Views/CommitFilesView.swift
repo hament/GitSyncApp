@@ -77,12 +77,14 @@ struct CommitFilesView: View {
                 Divider()
 
                 ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(model.selectedCommitFiles) { file in
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(model.selectedCommitFiles.enumerated()), id: \.element.id) { index, file in
                             fileRow(file, hash: commit.hash)
+                            if index < model.selectedCommitFiles.count - 1 {
+                                Divider()
+                            }
                         }
                     }
-                    .padding(6)
                 }
             }
         }
@@ -110,14 +112,14 @@ struct CommitFilesView: View {
                     if directory != "." && directory != "/" {
                         Text(directory)
                             .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.72) : Color.secondary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                     if let oldPath = file.oldPath {
                         Text("原路径：\(oldPath)")
                             .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.72) : Color.secondary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -127,17 +129,13 @@ struct CommitFilesView: View {
 
                 Text(file.label)
                     .font(.caption2)
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.82) : statusColor(file.label))
+                    .foregroundStyle(statusColor(file.label))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(
-                isSelected ? Color.accentColor : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .background(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
         }
         .buttonStyle(.plain)
     }
