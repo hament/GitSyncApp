@@ -27,6 +27,7 @@ final class AppModel {
   var repositoryPath: String?
   var repositoryDisplayName = ""
   var branchDisplayName = ""
+  var detachedBranchName: String?
   var unpushedCount: Int?
   var remoteAheadCount: Int?
   var currentBranchName: String?
@@ -116,8 +117,12 @@ final class AppModel {
   var localizedBranchDisplayName: String {
     if let currentBranchName { return currentBranchName }
     if isDetached {
+      if let detachedBranchName {
+        return L10n.text("\(detachedBranchName)（分离）", "\(detachedBranchName) (detached)")
+      }
       return branchDisplayName.isEmpty || branchDisplayName == "分离头指针"
-        ? L10n.text("分离头指针", "Detached HEAD") : branchDisplayName
+        ? L10n.text("分离头指针", "Detached HEAD")
+        : L10n.text("\(branchDisplayName)（分离）", "\(branchDisplayName) (detached)")
     }
     return repositoryPath == nil ? L10n.text("分支", "Branch") : L10n.text("尚无提交", "No commits yet")
   }
@@ -562,16 +567,15 @@ final class AppModel {
     else { return }
     defer { end() }
     let current = await git.run(args: ["branch", "--show-current"], cwd: cwd)
-    let upstream = await git.run(args: ["config", "--get", "branch.\(name).remote"], cwd: cwd)
     let remoteRefs = await git.run(
       args: ["for-each-ref", "--format=%(refname:short)", "refs/remotes"], cwd: cwd)
     guard !cancelRequested else { return }
-    guard current.exitCode == 0, remoteRefs.exitCode == 0, upstream.exitCode == 1 else {
+    guard current.exitCode == 0, remoteRefs.exitCode == 0 else {
       dialog = .plain(
         title: L10n.message("无法删除分支", "Unable to Delete Branch"),
         message: L10n.message(
-          "该分支配置了上游，或无法确认分支状态。仅支持删除未发布的本地分支。",
-          "This branch has an upstream configuration, or its state could not be verified. Only unpublished local branches can be deleted."
+          "无法确认分支状态，未删除该分支。",
+          "The branch state could not be verified, so it was not deleted."
         ))
       return
     }
@@ -1375,6 +1379,10 @@ final class AppModel {
       ],
       cwd: cwd
     )
+    async let branchesAtHead = git.run(
+      args: ["for-each-ref", "--format=%(refname:short)", "--points-at", "HEAD", "refs/heads"],
+      cwd: cwd
+    )
     async let head = git.run(args: ["rev-parse", "--short=7", "HEAD"], cwd: cwd)
     async let mergeHead = git.run(args: ["rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd: cwd)
 
@@ -1382,6 +1390,7 @@ final class AppModel {
     let currentOut = await showCurrent
     let localOut = await locals
     let remoteOut = await remotes
+    let branchesAtHeadOut = await branchesAtHead
     let headOut = await head
     let mergeOut = await mergeHead
     guard !cancelRequested else { return }
@@ -1414,15 +1423,22 @@ final class AppModel {
       isDetached = false
       currentBranchName = current
       branchDisplayName = current
+      detachedBranchName = nil
     } else if headOut.exitCode == 0 {
       let hash = headOut.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let exactBranches =
+        branchesAtHeadOut.exitCode == 0
+        ? LogParser.parseRefNames(branchesAtHeadOut.stdoutText) : []
       isDetached = true
       currentBranchName = nil
       branchDisplayName = hash.isEmpty ? "分离头指针" : hash
+      detachedBranchName = LogParser.preferredDetachedBranch(
+        exact: exactBranches, recent: recentBranchNames)
     } else {
       isDetached = false
       currentBranchName = nil
       branchDisplayName = "尚无提交"
+      detachedBranchName = nil
     }
 
     if updateDivergence {
@@ -1824,6 +1840,7 @@ final class AppModel {
     recentBranchNames = []
     currentBranchName = nil
     branchDisplayName = ""
+    detachedBranchName = nil
     unpushedCount = nil
     remoteAheadCount = nil
     isDetached = false

@@ -81,6 +81,21 @@ enum LogParser {
     }
   }
 
+  static func parseRefNames(_ text: String) -> [String] {
+    text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+      let name = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      return name.isEmpty ? nil : name
+    }
+  }
+
+  static func preferredDetachedBranch(exact: [String], recent: [String]) -> String? {
+    let names = exact.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter {
+      !$0.isEmpty
+    }
+    return recent.first(where: names.contains)
+      ?? names.min { $0.localizedStandardCompare($1) == .orderedAscending }
+  }
+
   static func parseRemoteBranches(_ text: String) -> [String] {
     text.split(separator: "\n", omittingEmptySubsequences: true)
       .compactMap { line -> String? in
