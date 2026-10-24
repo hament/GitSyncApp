@@ -2,26 +2,39 @@ import Darwin
 import Foundation
 
 enum GitClient {
+    @TaskLocal static var owner: UUID?
+    @TaskLocal static var operationEpoch: Int?
     private nonisolated static let lock = NSLock()
     private nonisolated(unsafe) static var cachedBinary: String?
     private nonisolated static let processes = ProcessRegistry()
 
-    static func run(args: [String], cwd: URL, timeout: TimeInterval = 30) async -> GitOutput {
-        await Task.detached(priority: .userInitiated) {
-            runSync(args: args, cwd: cwd, timeout: timeout)
+    static func run(args: [String], cwd: URL, timeout: TimeInterval = 30, environmentOverrides: [String: String] = [:]) async -> GitOutput {
+        let owner = Self.owner
+        let epoch = operationEpoch ?? processes.epoch(for: owner)
+        guard !Task.isCancelled, epoch == processes.epoch(for: owner) else {
+            return GitOutput(args: args, stdout: Data(), stderr: Data("Canceled".utf8), exitCode: -1)
+        }
+        return await Task.detached(priority: .userInitiated) {
+            runSync(args: args, cwd: cwd, timeout: timeout, owner: owner, epoch: epoch, environmentOverrides: environmentOverrides)
         }.value
     }
 
-    static func cancelAll() {
-        processes.cancelAll()
+    nonisolated static func cancel(owner: UUID) {
+        processes.cancel(owner: owner)
+    }
+
+    nonisolated static func currentEpoch(owner: UUID) -> Int {
+        processes.epoch(for: owner)
     }
 
     /// Runs `base + paths` in batches. Stops after the first non-zero exit and includes that result.
     static func runBatched(base: [String], paths: [String], cwd: URL, batchSize: Int = 80) async -> [GitOutput] {
         guard !paths.isEmpty else { return [] }
         var results: [GitOutput] = []
+        let epoch = processes.epoch(for: owner)
         var index = 0
         while index < paths.count {
+            guard epoch == processes.epoch(for: owner) else { break }
             let end = min(index + batchSize, paths.count)
             let slice = Array(paths[index..<end])
             let output = await run(args: base + slice, cwd: cwd)
@@ -32,12 +45,12 @@ enum GitClient {
         return results
     }
 
-    private nonisolated static func runSync(args: [String], cwd: URL, timeout: TimeInterval) -> GitOutput {
+    private nonisolated static func runSync(args: [String], cwd: URL, timeout: TimeInterval, owner: UUID?, epoch: Int, environmentOverrides: [String: String]) -> GitOutput {
         guard let binary = resolveBinary() else {
             return GitOutput(
                 args: args,
                 stdout: Data(),
-                stderr: Data("未找到 git".utf8),
+                stderr: Data("未找到 git / Git not found".utf8),
                 exitCode: -1
             )
         }
@@ -49,6 +62,7 @@ enum GitClient {
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["PATH"] = augmentedPath(environment["PATH"])
+        environment.merge(environmentOverrides) { _, override in override }
         process.environment = environment
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -70,7 +84,7 @@ enum GitClient {
                 exitCode: -1
             )
         }
-        processes.register(process)
+        processes.register(process, owner: owner, epoch: epoch)
         defer { processes.unregister(process) }
 
         let stdoutHandle = stdoutPipe.fileHandleForReading
@@ -92,17 +106,20 @@ enum GitClient {
         var timedOut = false
         if terminated.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
-            process.terminate()
+            processes.terminate(process)
             if terminated.wait(timeout: .now() + 1) == .timedOut {
-                kill(process.processIdentifier, SIGKILL)
+                processes.terminate(process, force: true)
                 terminated.wait()
             }
         }
-        group.wait()
+        if group.wait(timeout: .now() + 2) == .timedOut {
+            processes.terminate(process, force: true)
+            _ = group.wait(timeout: .now() + 1)
+        }
 
         var stderr = stderrBox.get()
         if timedOut {
-            let suffix = "\n命令执行超过 \(Int(timeout)) 秒，已自动终止。\n"
+            let suffix = "\n命令执行超过 \(Int(timeout)) 秒，已自动终止。 / Command exceeded \(Int(timeout)) seconds and was terminated automatically.\n"
             stderr.append(Data(suffix.utf8))
         }
         return GitOutput(
@@ -113,7 +130,7 @@ enum GitClient {
         )
     }
 
-    private nonisolated static func resolveBinary() -> String? {
+    nonisolated static func resolveBinary() -> String? {
         lock.lock()
         defer { lock.unlock() }
         if let cachedBinary { return cachedBinary }
@@ -152,14 +169,26 @@ enum GitClient {
     }
 }
 
-private nonisolated final class ProcessRegistry: @unchecked Sendable {
+nonisolated final class ProcessRegistry: @unchecked Sendable {
     private let lock = NSLock()
-    private var running: [Int32: Process] = [:]
+    private var running: [Int32: (process: Process, owner: UUID?, group: Int32?)] = [:]
+    private var epochs: [UUID: Int] = [:]
 
-    func register(_ process: Process) {
+    func epoch(for owner: UUID?) -> Int {
         lock.lock()
-        running[process.processIdentifier] = process
-        lock.unlock()
+        defer { lock.unlock() }
+        return owner.map { epochs[$0, default: 0] } ?? 0
+    }
+
+    func register(_ process: Process, owner: UUID?, epoch: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        let pid = process.processIdentifier
+        running[pid] = (process, owner, getpgid(pid) == pid ? pid : nil)
+        if let owner, epochs[owner, default: 0] != epoch, process.isRunning {
+            signalLocked(process, force: false)
+            scheduleEscalation(process)
+        }
     }
 
     func unregister(_ process: Process) {
@@ -168,13 +197,74 @@ private nonisolated final class ProcessRegistry: @unchecked Sendable {
         lock.unlock()
     }
 
-    func cancelAll() {
+    func cancel(owner: UUID) {
         lock.lock()
-        let processes = Array(running.values)
-        lock.unlock()
-        for process in processes where process.isRunning {
-            process.terminate()
+        defer { lock.unlock() }
+        epochs[owner, default: 0] += 1
+        for entry in running.values where entry.owner == owner {
+            signalLocked(entry.process, force: false)
+            scheduleEscalation(entry.process)
         }
+    }
+
+    func terminate(_ process: Process, force: Bool = false) {
+        lock.lock()
+        defer { lock.unlock() }
+        signalLocked(process, force: force)
+        if !force { scheduleEscalation(process) }
+    }
+
+    private func signalLocked(_ process: Process, force: Bool) {
+        if let entry = running[process.processIdentifier], entry.process === process, let group = entry.group {
+            kill(-group, force ? SIGKILL : SIGTERM)
+        } else if process.isRunning {
+            kill(process.processIdentifier, force ? SIGKILL : SIGTERM)
+        }
+    }
+
+    private func scheduleEscalation(_ process: Process) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [self] in
+            lock.lock()
+            defer { lock.unlock() }
+            guard running[process.processIdentifier]?.process === process else { return }
+            signalLocked(process, force: true)
+        }
+    }
+}
+
+struct WindowGitClient {
+    let owner = UUID()
+
+    func run(args: [String], cwd: URL, timeout: TimeInterval = 30) async -> GitOutput {
+        await GitClient.$owner.withValue(owner) {
+            await GitClient.run(args: args, cwd: cwd, timeout: timeout)
+        }
+    }
+
+    func runBatched(base: [String], paths: [String], cwd: URL, batchSize: Int = 80) async -> [GitOutput] {
+        await GitClient.$owner.withValue(owner) {
+            await GitClient.runBatched(base: base, paths: paths, cwd: cwd, batchSize: batchSize)
+        }
+    }
+
+    func perform<Value>(_ operation: () async throws -> Value) async rethrows -> Value {
+        let epoch = GitClient.operationEpoch ?? GitClient.currentEpoch(owner: owner)
+        return try await GitClient.$owner.withValue(owner) {
+            try await GitClient.$operationEpoch.withValue(epoch, operation: operation)
+        }
+    }
+
+    func performCancellable<Value>(_ operation: () async throws -> Value) async rethrows -> Value {
+        let owner = owner
+        return try await withTaskCancellationHandler {
+            try await perform(operation)
+        } onCancel: {
+            GitClient.cancel(owner: owner)
+        }
+    }
+
+    func cancel() {
+        GitClient.cancel(owner: owner)
     }
 }
 

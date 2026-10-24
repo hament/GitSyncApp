@@ -2,18 +2,19 @@ import SwiftUI
 
 struct HistoryList: View {
     var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
-    private static let relative: RelativeDateTimeFormatter = {
+    private var relative: RelativeDateTimeFormatter {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LanguageSettings.shared.language.locale
         formatter.unitsStyle = .full
         return formatter
-    }()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Picker(
-                "历史范围",
+                L10n.text("历史范围", "History scope"),
                 selection: Binding(
                     get: { model.historyScope },
                     set: { model.setHistoryScope($0) }
@@ -42,7 +43,7 @@ struct HistoryList: View {
             .padding(.bottom, 6)
 
             if model.commits.isEmpty {
-                Text(model.isRefreshing ? "正在读取提交历史…" : "还没有提交")
+                Text(model.isRefreshing ? L10n.text("正在读取提交历史…", "Loading commit history…") : L10n.text("还没有提交", "No commits yet"))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -58,7 +59,7 @@ struct HistoryList: View {
                             )
                         }
                         if model.canLoadMoreHistory {
-                            Button("加载更多") {
+                            Button(L10n.text("加载更多", "Load More")) {
                                 Task { await model.loadMoreHistory() }
                             }
                             .disabled(model.isWorking)
@@ -74,9 +75,9 @@ struct HistoryList: View {
 
     private var scopeDescription: String {
         switch model.historyScope {
-        case .current: "当前分支可到达的提交"
-        case .mainline: "当前分支主线提交"
-        case .all: "本地与远程所有分支"
+        case .current: L10n.text("当前分支可到达的提交", "Commits reachable from the current branch")
+        case .mainline: L10n.text("当前分支主线提交", "Mainline commits on the current branch")
+        case .all: L10n.text("本地与远程所有分支", "All local and remote branches")
         }
     }
 
@@ -104,7 +105,7 @@ struct HistoryList: View {
                     if !commit.references.isEmpty || commit.isMerge {
                         HStack(spacing: 4) {
                             if commit.isMerge {
-                                referenceBadge("Merge", color: .orange, isSelected: isSelected)
+                                referenceBadge(L10n.text("合并", "Merge"), color: .orange, isSelected: isSelected)
                             }
                             ForEach(Array(commit.references.prefix(2)), id: \.self) { reference in
                                 referenceBadge(
@@ -122,7 +123,7 @@ struct HistoryList: View {
                         .lineLimit(1)
                     }
 
-                    Text(commit.subject.isEmpty ? "（无说明）" : commit.subject)
+                    Text(commit.subject.isEmpty ? L10n.text("（无说明）", "(No message)") : commit.subject)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -132,7 +133,7 @@ struct HistoryList: View {
                         Text(commit.authorName)
                             .lineLimit(1)
                         Text("·")
-                        Text(Self.relative.localizedString(for: commit.date, relativeTo: Date()))
+                        Text(relative.localizedString(for: commit.date, relativeTo: Date()))
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         Text(commit.shortHash)
@@ -155,6 +156,24 @@ struct HistoryList: View {
             .foregroundStyle(isSelected ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(L10n.text("创建 Tag…", "Create Tag…")) {
+                Task { await model.presentNewTag(reference: commit.hash, label: commit.shortHash) }
+            }
+            .disabled(model.isWorking)
+            Button(L10n.text("创建分支…", "Create Branch…")) {
+                model.presentNewBranch(startCommit: commit.hash)
+            }
+            .disabled(model.isWorking)
+            Button(L10n.text("差异对比", "Compare Changes")) {
+                Task {
+                    if let request = await model.prepareComparison(reference: commit.hash, label: commit.shortHash) {
+                        openWindow(value: request)
+                    }
+                }
+            }
+            .disabled(model.isWorking)
+        }
     }
 
     private func graphWidth(_ laneCount: Int) -> CGFloat {
@@ -162,7 +181,7 @@ struct HistoryList: View {
     }
 
     private func referenceBadge(_ title: String, color: Color, isSelected: Bool) -> some View {
-        Text(title)
+        Label(title.hasPrefix("tag: ") ? String(title.dropFirst(5)) : title, systemImage: title.hasPrefix("tag: ") ? "tag.fill" : "arrow.triangle.branch")
             .font(.system(size: 9, weight: .semibold))
             .lineLimit(1)
             .padding(.horizontal, 5)
@@ -176,6 +195,7 @@ struct HistoryList: View {
 
     private func referenceColor(_ reference: String) -> Color {
         if reference == "HEAD" { return .red }
+        if reference.hasPrefix("tag: ") { return .blue }
         if model.remoteBranchNames.contains(reference) { return .purple }
         return .green
     }

@@ -19,6 +19,18 @@ enum RecentsStore {
         UserDefaults.standard.stringArray(forKey: repositoriesKey) ?? []
     }
 
+    static func removeRepository(_ path: String) {
+        let repositories = recentRepositories().filter { $0 != path }
+        UserDefaults.standard.set(repositories, forKey: repositoriesKey)
+        if UserDefaults.standard.string(forKey: lastKey) == path {
+            if let first = repositories.first {
+                UserDefaults.standard.set(first, forKey: lastKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: lastKey)
+            }
+        }
+    }
+
     static func rememberRepository(_ path: String) {
         guard !path.isEmpty else { return }
         var repositories = recentRepositories()

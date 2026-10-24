@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DiffView: View {
     var model: AppModel
+    var comparison = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,11 +19,11 @@ struct DiffView: View {
     @ViewBuilder
     private var content: some View {
         if model.diffTitle.isEmpty {
-            emptyState("选择一个文件查看差异", systemImage: "doc.text.magnifyingglass")
+            emptyState(L10n.text("选择一个文件查看差异", "Select a file to view its diff"), systemImage: "doc.text.magnifyingglass")
         } else if model.diff.isBinary {
-            emptyState("二进制文件，不显示差异", systemImage: "doc.zipper")
+            emptyState(L10n.text("二进制文件，不显示差异", "Diff not available for binary files"), systemImage: "doc.zipper")
         } else if model.diff.lines.isEmpty {
-            emptyState("没有差异", systemImage: "checkmark.circle")
+            emptyState(L10n.text("没有差异", "No differences"), systemImage: "checkmark.circle")
         } else if model.diffLayoutMode == .split {
             splitContent
         } else {
@@ -31,37 +32,42 @@ struct DiffView: View {
     }
 
     private var unifiedContent: some View {
-        ScrollView([.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if model.diff.truncated {
-                    truncatedNotice
-                }
-                ForEach(Array(model.diff.lines.enumerated()), id: \.offset) { index, line in
-                    diffRow(line, index: index)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            if model.diff.truncated {
+                truncatedNotice
             }
-            .padding(.bottom, 8)
+            selectableContent
         }
     }
 
     private var splitContent: some View {
-        GeometryReader { geometry in
-            let paneWidth = max((geometry.size.width - 1) / 2, 1)
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    splitColumnHeader(paneWidth: paneWidth)
-                    if model.diff.truncated {
-                        truncatedNotice
-                            .frame(width: paneWidth * 2 + 1, alignment: .leading)
-                    }
-                    ForEach(Array(model.diff.splitRows.enumerated()), id: \.offset) { index, row in
-                        splitRow(row, index: index, paneWidth: paneWidth)
-                    }
-                }
-                .frame(width: geometry.size.width, alignment: .leading)
-                .padding(.bottom, 8)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 1) {
+                Label(comparison ? L10n.text("当前分支", "Current branch") : L10n.text("旧文件", "Old file"), systemImage: "arrow.left")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Label(comparison ? L10n.text("对比文件", "Comparison file") : L10n.text("新文件", "New file"), systemImage: "arrow.right")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Color(nsColor: .controlBackgroundColor))
+            Divider()
+            if model.diff.truncated {
+                truncatedNotice
+            }
+            selectableContent
         }
+    }
+
+    private var selectableContent: some View {
+        SelectableDiffView(
+            document: model.diff,
+            mode: model.diffLayoutMode,
+            identity: "\(model.mode)-\(model.selectedHistoryHash ?? "")-\(model.diffTitle)"
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var fileHeader: some View {
@@ -71,27 +77,40 @@ struct DiffView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text((model.diffTitle as NSString).lastPathComponent)
-                    .font(.system(.body, design: .monospaced, weight: .semibold))
-                    .lineLimit(1)
-                let directory = (model.diffTitle as NSString).deletingLastPathComponent
-                if !directory.isEmpty {
-                    Text(directory)
+                let fileName = (model.diffTitle as NSString).lastPathComponent
+                HStack(spacing: 5) {
+                    Text(fileName)
+                        .font(.system(.body, design: .monospaced, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(fileName)
+                    DiffHeaderCopyButton(
+                        text: fileName,
+                        title: L10n.text("复制文件名", "Copy file name")
+                    )
+                }
+                HStack(spacing: 5) {
+                    Text(model.diffTitle)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(model.diffTitle)
+                    DiffHeaderCopyButton(
+                        text: model.diffTitle,
+                        title: L10n.text("复制相对文件路径", "Copy relative file path")
+                    )
                 }
             }
 
             Spacer(minLength: 12)
 
-            Text(model.mode == .history ? "提交差异" : "工作区差异")
+            Text(comparison ? L10n.text("对比差异", "Comparison diff") : (model.mode != .changes ? L10n.text("提交差异", "Commit diff") : L10n.text("工作区差异", "Working tree diff")))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Picker(
-                "显示模式",
+                L10n.text("显示模式", "Display mode"),
                 selection: Binding(
                     get: { model.diffLayoutMode },
                     set: { model.diffLayoutMode = $0 }
@@ -112,182 +131,12 @@ struct DiffView: View {
         .background(Color.primary.opacity(0.025))
     }
 
-    private func diffRow(_ line: DiffLine, index: Int) -> some View {
-        Group {
-            if line.kind == .hunk {
-                HStack(spacing: 0) {
-                    lineNumber(nil)
-                    lineNumber(nil)
-                    Text(line.text)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.blue)
-                        .padding(.leading, 10)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                }
-            } else {
-                HStack(spacing: 0) {
-                    lineNumber(line.oldLineNumber)
-                    lineNumber(line.newLineNumber)
-
-                    Text(marker(line))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(foreground(line.kind))
-                        .frame(width: 24, alignment: .center)
-
-                    Text(contentText(line))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(foreground(line.kind))
-                        .fixedSize(horizontal: true, vertical: false)
-                        .textSelection(.enabled)
-
-                    Spacer(minLength: 16)
-                }
-            }
-        }
-        .frame(minWidth: 720, minHeight: 22, alignment: .leading)
-        .background(background(line.kind))
-        .overlay(alignment: .bottom) {
-            if line.kind == .hunk {
-                Rectangle()
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(height: 1)
-            }
-        }
-        .accessibilityLabel("第 \(index + 1) 行，\(line.text)")
-    }
-
-    private func splitColumnHeader(paneWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            splitColumnTitle("旧文件", systemImage: "arrow.left", width: paneWidth)
-            Rectangle()
-                .fill(Color.primary.opacity(0.13))
-                .frame(width: 1, height: 30)
-            splitColumnTitle("新文件", systemImage: "arrow.right", width: paneWidth)
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.1))
-                .frame(height: 1)
-        }
-    }
-
-    private func splitColumnTitle(_ title: String, systemImage: String, width: CGFloat) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .frame(width: width, height: 30, alignment: .leading)
-    }
-
-    private func splitRow(_ row: SplitDiffRow, index: Int, paneWidth: CGFloat) -> some View {
-        Group {
-            switch row {
-            case .hunk(let text):
-                HStack(spacing: 0) {
-                    Text(text)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.blue)
-                        .padding(.horizontal, 10)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                }
-                .frame(width: paneWidth * 2 + 1, height: 22, alignment: .leading)
-                .background(Color.blue.opacity(0.08))
-            case .lines(let old, let new):
-                HStack(spacing: 0) {
-                    splitCell(old, isOldSide: true, width: paneWidth)
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.13))
-                        .frame(width: 1, height: 22)
-                    splitCell(new, isOldSide: false, width: paneWidth)
-                }
-            }
-        }
-        .accessibilityLabel("对比第 \(index + 1) 行")
-    }
-
-    private func splitCell(_ line: DiffLine?, isOldSide: Bool, width: CGFloat) -> some View {
-        let number = isOldSide ? line?.oldLineNumber : line?.newLineNumber
-        let kind = line?.kind
-        let marker: String = {
-            if isOldSide, kind == .delete { return "−" }
-            if !isOldSide, kind == .add { return "+" }
-            return ""
-        }()
-
-        return HStack(spacing: 0) {
-            splitLineNumber(number)
-            Text(marker)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(kind.map(foreground) ?? .secondary)
-                .frame(width: 24)
-            if let line {
-                Text(contentText(line))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(foreground(line.kind))
-                    .fixedSize(horizontal: true, vertical: false)
-                    .textSelection(.enabled)
-            }
-            Spacer(minLength: 12)
-        }
-        .frame(width: width, height: 22, alignment: .leading)
-        .background(kind.map(background) ?? Color.primary.opacity(0.018))
-        .clipped()
-    }
-
-    private func splitLineNumber(_ number: Int?) -> some View {
-        Text(number.map(String.init) ?? "")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.tertiary)
-            .frame(width: 46, height: 22, alignment: .trailing)
-            .padding(.trailing, 7)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.07))
-                    .frame(width: 1)
-            }
-    }
-
     private var truncatedNotice: some View {
-        Text("差异过长，已截断")
+        Text(L10n.text("差异过长，已截断", "Diff truncated because it is too long"))
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-    }
-
-    private func lineNumber(_ number: Int?) -> some View {
-        Text(number.map(String.init) ?? "")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.tertiary)
-            .frame(width: 46, height: 22, alignment: .trailing)
-            .padding(.trailing, 7)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.07))
-                    .frame(width: 1)
-            }
-    }
-
-    private func marker(_ line: DiffLine) -> String {
-        switch line.kind {
-        case .add: "+"
-        case .delete: "−"
-        case .hunk, .context: ""
-        }
-    }
-
-    private func contentText(_ line: DiffLine) -> String {
-        guard line.kind != .hunk, !line.text.hasPrefix("\\") else { return line.text }
-        if line.text.first == "+" || line.text.first == "-" || line.text.first == " " {
-            let content = String(line.text.dropFirst())
-            return content.isEmpty ? " " : content
-        }
-        return line.text.isEmpty ? " " : line.text
     }
 
     private func changeBadge(_ title: String, color: Color) -> some View {
@@ -310,21 +159,30 @@ struct DiffView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func foreground(_ kind: DiffLineKind) -> Color {
-        switch kind {
-        case .add: Color(nsColor: .systemGreen)
-        case .delete: Color(nsColor: .systemRed)
-        case .hunk: .blue
-        case .context: .primary
-        }
-    }
+}
 
-    private func background(_ kind: DiffLineKind) -> Color {
-        switch kind {
-        case .add: Color.green.opacity(0.13)
-        case .delete: Color.red.opacity(0.11)
-        case .hunk: Color.blue.opacity(0.08)
-        case .context: .clear
+private struct DiffHeaderCopyButton: View {
+    let text: String
+    let title: String
+    @State private var copyID: UUID?
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            if NSPasteboard.general.setString(text, forType: .string) {
+                copyID = UUID()
+            }
+        } label: {
+            Image(systemName: copyID == nil ? "doc.on.doc" : "checkmark")
         }
+        .buttonStyle(CommitCopyButtonStyle())
+        .help(copyID == nil ? title : L10n.text("已复制", "Copied"))
+        .accessibilityLabel(title)
+        .task(id: copyID) {
+            guard copyID != nil else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            copyID = nil
+        }
+        .onChange(of: text) { copyID = nil }
     }
 }

@@ -8,14 +8,16 @@ nonisolated enum ChangeKind: String, Hashable, Sendable {
     case renamed
     case conflict
 
-    var title: String {
+    @MainActor var title: String { titleText.localized }
+
+    var titleText: LocalizedText {
         switch self {
-        case .modified: "修改"
-        case .added: "新增"
-        case .deleted: "删除"
-        case .untracked: "未跟踪"
-        case .renamed: "重命名"
-        case .conflict: "冲突"
+        case .modified: L10n.message("修改", "Modified")
+        case .added: L10n.message("新增", "Added")
+        case .deleted: L10n.message("删除", "Deleted")
+        case .untracked: L10n.message("未跟踪", "Untracked")
+        case .renamed: L10n.message("重命名", "Renamed")
+        case .conflict: L10n.message("冲突", "Conflict")
         }
     }
 
@@ -41,6 +43,33 @@ nonisolated struct BranchItem: Identifiable, Hashable, Sendable {
     }
 }
 
+nonisolated struct ComparisonRequest: Codable, Hashable, Identifiable, Sendable {
+    var id = UUID()
+    let repositoryPath: String
+    let baseHash: String
+    let headHash: String
+    let baseLabel: String
+    let headLabel: String
+}
+
+nonisolated struct TagRecord: Identifiable, Hashable, Sendable {
+    let name: String
+    let objectHash: String
+    let commitHash: String
+    let isAnnotated: Bool
+    let author: String
+    let date: Date
+    let summary: String
+    let message: String
+    var id: String { name }
+}
+
+nonisolated struct TagTarget: Identifiable, Sendable {
+    let commit: CommitRecord
+    let label: String
+    var id: String { commit.hash }
+}
+
 nonisolated struct CommitRecord: Identifiable, Hashable, Sendable {
     var hash: String
     var parentHashes: [String] = []
@@ -60,11 +89,13 @@ nonisolated enum HistoryScope: String, CaseIterable, Hashable, Sendable {
     case mainline
     case all
 
-    var title: String {
+    @MainActor var title: String { titleText.localized }
+
+    var titleText: LocalizedText {
         switch self {
-        case .current: "当前分支"
-        case .mainline: "主线"
-        case .all: "所有分支"
+        case .current: L10n.message("当前分支", "Current Branch")
+        case .mainline: L10n.message("主线", "Mainline")
+        case .all: L10n.message("所有分支", "All Branches")
         }
     }
 }
@@ -129,10 +160,17 @@ nonisolated enum CommitGraphLayout {
 }
 
 nonisolated struct CommitFile: Identifiable, Hashable, Sendable {
-    var label: String
+    var labelText: LocalizedText
+    @MainActor var label: String { labelText.localized }
     var path: String
     var oldPath: String?
     var id: String { (oldPath ?? "") + "→" + path }
+
+    init(label: LocalizedText, path: String, oldPath: String?) {
+        labelText = label
+        self.path = path
+        self.oldPath = oldPath
+    }
 }
 
 nonisolated enum DiffLineKind: Hashable, Sendable {
@@ -241,30 +279,40 @@ nonisolated struct GitOutput: Sendable {
 }
 
 nonisolated struct FailureReport: Identifiable, Hashable, Sendable {
-    var title: String
-    var reason: String
-    var log: String
-    var id: String { title + "\n" + reason + "\n" + log }
+    var title: LocalizedText
+    var reason: LocalizedText
+    var log: LocalizedText
+    var id: String { "\(title.chinese)\n\(title.english)\n\(reason.chinese)\n\(reason.english)\n\(log.chinese)\n\(log.english)" }
 }
 
 nonisolated enum AppDialog: Identifiable, Hashable, Sendable {
     case discard(FileChange)
+    case discardFiles([FileChange])
+    case removePathsFromIndex([String], folders: Bool)
     case removeFromIndex(FileChange)
+    case removeFolderFromIndex(String)
     case merge(String)
+    case deleteBranch(String)
+    case deleteTag(TagRecord)
     case abortMerge
     case notRepository
     case vscodeMissing
-    case plain(title: String, message: String)
+    case plain(title: LocalizedText, message: LocalizedText)
 
     var id: String {
         switch self {
         case .discard(let file): "discard:\(file.path)"
         case .removeFromIndex(let file): "untrack:\(file.path)"
+        case .removeFolderFromIndex(let path): "untrack-folder:\(path)"
+        case .discardFiles(let files): "discard-files:\(files.map(\.path))"
+        case .removePathsFromIndex(let paths, let folders): "untrack-paths:\(folders):\(paths)"
         case .merge(let source): "merge:\(source)"
+        case .deleteBranch(let name): "delete-branch:\(name)"
+        case .deleteTag(let tag): "delete-tag:\(tag.name):\(tag.objectHash)"
         case .abortMerge: "abort"
         case .notRepository: "not-repo"
         case .vscodeMissing: "vscode"
-        case .plain(let title, let message): "plain:\(title)\n\(message)"
+        case .plain(let title, let message): "plain:\(title.chinese)\n\(title.english)\n\(message.chinese)\n\(message.english)"
         }
     }
 }
@@ -272,6 +320,7 @@ nonisolated enum AppDialog: Identifiable, Hashable, Sendable {
 nonisolated enum SidebarMode: String, Hashable, Sendable {
     case changes
     case history
+    case tags
 }
 
 nonisolated enum BranchNameCheck: Equatable, Sendable {

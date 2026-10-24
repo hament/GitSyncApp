@@ -1,6 +1,10 @@
+# xcode
 .build/
 /GitSync/build
 .DS_Store
+/GitSync/GitSync.xcodeproj/project.xcworkspace/xcuserdata/*
+
+# test
 Tests
 !/Tests/
 /Tests/*
@@ -9,4 +13,6 @@ Tests
 !/Tests/CloneAuthenticationFlowTests.swift
 !/Tests/run-clone-auth-regressions.sh
 !/Tests/RecentRepositoryTests.swift
-/GitSync/GitSync.xcodeproj/project.xcworkspace/xcuserdata/hament.h.b.dong.xcuserdatad/UserInterfaceState.xcuserstate
+
+# other
+codeimages
