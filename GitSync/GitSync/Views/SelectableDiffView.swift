@@ -230,7 +230,7 @@ final class DiffTextView: NSTextView {
           at: NSPoint(x: CGFloat(column + 1) * 53 - 7 - width, y: top + 4),
           withAttributes: attributes)
       }
-      let marker = row.kind == .add ? "+" : (row.kind == .delete ? "−" : "")
+      let marker = row.kind == .add ? "+" : (row.kind == .delete ? "-" : "")
       (marker as NSString).draw(
         at: NSPoint(x: gutterWidth - 19, y: top + 4),
         withAttributes: [
