@@ -1,2 +1,12 @@
 .build/
 /GitSync/build
+.DS_Store
+Tests
+!/Tests/
+/Tests/*
+!/Tests/BranchListTests.swift
+!/Tests/CloneAuthenticationGuideTests.swift
+!/Tests/CloneAuthenticationFlowTests.swift
+!/Tests/run-clone-auth-regressions.sh
+!/Tests/RecentRepositoryTests.swift
+/GitSync/GitSync.xcodeproj/project.xcworkspace/xcuserdata/hament.h.b.dong.xcuserdatad/UserInterfaceState.xcuserstate
