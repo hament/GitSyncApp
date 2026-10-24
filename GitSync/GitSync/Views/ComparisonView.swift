@@ -39,6 +39,7 @@ struct ComparisonView: View {
                 errorView(listError) { Task { await loadFiles() } }
             } else if files.isEmpty {
                 ContentUnavailableView(L10n.text("没有差异", "No differences"), systemImage: "checkmark.circle")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HSplitView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -92,9 +93,10 @@ struct ComparisonView: View {
                     }
                     .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 850, minHeight: 550)
+        .frame(minWidth: 850, maxWidth: .infinity, minHeight: 550, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(L10n.text("差异对比", "Compare Changes"))
         .task { await loadFiles() }
         .task(id: selectedPath) { await loadDiff() }
