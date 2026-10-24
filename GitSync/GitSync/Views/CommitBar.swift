@@ -7,11 +7,11 @@ struct CommitBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(model.mergeInProgress ? "合并提交说明" : "提交说明")
+                Text(model.mergeInProgress ? L10n.text("合并提交说明", "Merge commit message") : L10n.text("提交说明", "Commit message"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("Shift + Enter 换行 · ⌘ Enter 提交")
+                Text(L10n.text("Shift + Enter 换行 · ⌘ Enter 提交", "Shift + Enter for a new line · ⌘ Enter to commit"))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -23,7 +23,7 @@ struct CommitBar: View {
                 }
 
                 if model.commitMessage.isEmpty {
-                    Text("输入本次提交说明…")
+                    Text(L10n.text("输入本次提交说明…", "Enter a commit message…"))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 9)
@@ -38,11 +38,11 @@ struct CommitBar: View {
             }
 
             HStack {
-                Text("已选择 \(model.checkedCount) 个文件")
+                Text(L10n.text("已选择 \(model.checkedCount) 个文件", "\(model.checkedCount) files selected"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(model.mergeInProgress ? "完成合并" : "提交 \(model.checkedCount) 个文件") {
+                Button(model.mergeInProgress ? L10n.text("完成合并", "Complete Merge") : L10n.text("提交 \(model.checkedCount) 个文件", "Commit \(model.checkedCount) Files")) {
                     Task { await model.commit() }
                 }
                 .disabled(!model.canCommit)
@@ -73,6 +73,7 @@ private struct CommitMessageTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onCommit = onCommit
         textView.string = text
+        textView.setAccessibilityLabel(L10n.text("提交说明", "Commit message"))
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.textColor = .textColor
         textView.insertionPointColor = .controlAccentColor
@@ -99,6 +100,7 @@ private struct CommitMessageTextView: NSViewRepresentable {
         context.coordinator.text = $text
         guard let textView = scrollView.documentView as? CommitNSTextView else { return }
         textView.onCommit = onCommit
+        textView.setAccessibilityLabel(L10n.text("提交说明", "Commit message"))
         if textView.string != text {
             let selection = textView.selectedRange()
             textView.string = text

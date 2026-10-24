@@ -36,7 +36,7 @@ enum LogParser {
             } else if value.hasSuffix("/HEAD") || value.contains("/HEAD -> ") {
                 continue
             } else if value.hasPrefix("tag: ") {
-                references.append(String(value.dropFirst("tag: ".count)))
+                references.append(value)
             } else if !value.isEmpty {
                 references.append(value)
             }
@@ -98,14 +98,14 @@ enum LogParser {
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    private static func label(for status: String) -> String {
+    private static func label(for status: String) -> LocalizedText {
         switch status.first {
-        case "A": "新增"
-        case "D": "删除"
-        case "R": "重命名"
-        case "C": "复制"
-        case "U": "冲突"
-        default: "修改"
+        case "A": L10n.message("新增", "Added")
+        case "D": L10n.message("删除", "Deleted")
+        case "R": L10n.message("重命名", "Renamed")
+        case "C": L10n.message("复制", "Copied")
+        case "U": L10n.message("冲突", "Conflict")
+        default: L10n.message("修改", "Modified")
         }
     }
 }

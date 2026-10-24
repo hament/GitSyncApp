@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CommitFilesView: View {
     var model: AppModel
+    @State private var copyToastID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -10,16 +11,43 @@ struct CommitFilesView: View {
                 Divider()
                 filesContent(commit)
             } else {
-                emptyState("选择一条提交", systemImage: "clock.arrow.circlepath")
+                emptyState(L10n.text("选择一条提交", "Select a commit"), systemImage: "clock.arrow.circlepath")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottom) {
+            if copyToastID != nil {
+                Label(L10n.text("提交号已复制", "Commit hash copied"), systemImage: "checkmark.circle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .padding(12)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: copyToastID != nil)
+        .task(id: copyToastID) {
+            guard copyToastID != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            copyToastID = nil
+        }
+        .onChange(of: model.selectedCommitHash) {
+            copyToastID = nil
+        }
     }
 
     private func commitHeader(_ commit: CommitRecord) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(commit.subject.isEmpty ? "（无说明）" : commit.subject)
+            Text(commit.subject.isEmpty ? L10n.text("（无说明）", "(No message)") : commit.subject)
                 .font(.headline)
                 .lineLimit(2)
 
@@ -30,7 +58,10 @@ struct CommitFilesView: View {
                     .lineLimit(1)
                 Text("·")
                     .foregroundStyle(.tertiary)
-                Text(commit.date.formatted(date: .abbreviated, time: .shortened))
+                Text(commit.date.formatted(
+                    Date.FormatStyle(date: .abbreviated, time: .shortened)
+                        .locale(LanguageSettings.shared.language.locale)
+                ))
                     .lineLimit(1)
             }
             .font(.caption)
@@ -41,33 +72,48 @@ struct CommitFilesView: View {
                 Text(commit.shortHash)
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    if NSPasteboard.general.setString(commit.hash, forType: .string) {
+                        copyToastID = UUID()
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(CommitCopyButtonStyle())
+                .help(L10n.text("复制完整提交号", "Copy full commit hash"))
+                .accessibilityLabel(L10n.text("复制完整提交号", "Copy full commit hash"))
             }
             .foregroundStyle(.secondary)
 
             if !model.selectedCommitBranches.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("包含此提交的分支")
+                    Text(L10n.text("指向此提交的分支", "Branches pointing to this commit"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 5) {
-                            ForEach(model.selectedCommitBranches, id: \.self) { branch in
-                                let isRemote = model.remoteBranchNames.contains(branch)
-                                Label(
-                                    branch,
-                                    systemImage: isRemote
-                                        ? "network"
-                                        : "arrow.triangle.branch"
-                                )
-                                .font(.system(size: 9, weight: .medium))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .foregroundStyle(isRemote ? Color.purple : Color.green)
-                                .background(
-                                    (isRemote ? Color.purple : Color.green).opacity(0.12),
-                                    in: Capsule()
-                                )
-                            }
+                    BranchTagLayout(spacing: 5) {
+                        ForEach(model.selectedCommitBranches.prefix(5), id: \.self) { branch in
+                            let isRemote = model.remoteBranchNames.contains(branch)
+                            Label(
+                                branch,
+                                systemImage: isRemote
+                                    ? "network"
+                                    : "arrow.triangle.branch"
+                            )
+                            .font(.system(size: 9, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .foregroundStyle(isRemote ? Color.purple : Color.green)
+                            .background(
+                                (isRemote ? Color.purple : Color.green).opacity(0.12),
+                                in: Capsule()
+                            )
+                        }
+                        if model.selectedCommitBranches.count > 5 {
+                            Text("...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -83,19 +129,19 @@ struct CommitFilesView: View {
             VStack(spacing: 9) {
                 ProgressView()
                     .controlSize(.small)
-                Text("正在读取修改文件…")
+                Text(L10n.text("正在读取修改文件…", "Loading changed files…"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.commitFiles[commit.hash] == nil {
-            emptyState("正在等待文件列表", systemImage: "doc.on.doc")
+            emptyState(L10n.text("正在等待文件列表", "Waiting for the file list"), systemImage: "doc.on.doc")
         } else if model.selectedCommitFiles.isEmpty {
-            emptyState("这次提交没有修改文件", systemImage: "doc")
+            emptyState(L10n.text("这次提交没有修改文件", "No changed files in this commit"), systemImage: "doc")
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    Text("\(model.selectedCommitFiles.count) 个修改文件")
+                    Text(L10n.text("\(model.selectedCommitFiles.count) 个修改文件", "\(model.selectedCommitFiles.count) changed files"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -129,9 +175,9 @@ struct CommitFilesView: View {
             model.selectHistoryFile(hash: hash, path: file.path)
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: statusIcon(file.label))
+                Image(systemName: statusIcon(file.labelText.chinese))
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(statusColor(file.label))
+                    .foregroundStyle(statusColor(file.labelText.chinese))
                     .frame(width: 18)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -146,7 +192,7 @@ struct CommitFilesView: View {
                             .truncationMode(.middle)
                     }
                     if let oldPath = file.oldPath {
-                        Text("原路径：\(oldPath)")
+                        Text(L10n.text("原路径：\(oldPath)", "Original path: \(oldPath)"))
                             .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -158,7 +204,7 @@ struct CommitFilesView: View {
 
                 Text(file.label)
                     .font(.caption2)
-                    .foregroundStyle(statusColor(file.label))
+                    .foregroundStyle(statusColor(file.labelText.chinese))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -198,5 +244,68 @@ struct CommitFilesView: View {
         case "重命名", "复制": .blue
         default: .orange
         }
+    }
+}
+
+struct CommitCopyButtonStyle: ButtonStyle {
+    @Environment(\.projectTheme) private var theme
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 24, height: 24)
+            .foregroundStyle(configuration.isPressed ? theme.color : Color.secondary)
+            .background {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(theme.color.opacity(configuration.isPressed ? 0.25 : (isHovering ? 0.12 : 0)))
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+    }
+}
+
+private struct BranchTagLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrangement(width: proposal.width, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangement(width: bounds.width, subviews: subviews)
+        for (subview, frame) in zip(subviews, result.frames) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+    }
+
+    private func arrangement(width: CGFloat?, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let availableWidth = max(0, width ?? .infinity)
+        var frames: [CGRect] = []
+        var positionX: CGFloat = 0
+        var positionY: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var contentWidth: CGFloat = 0
+
+        for subview in subviews {
+            let idealSize = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(
+                width: min(idealSize.width, availableWidth), height: nil
+            ))
+            if positionX > 0 && positionX + size.width > availableWidth {
+                positionX = 0
+                positionY += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: positionX, y: positionY), size: size))
+            contentWidth = max(contentWidth, positionX + size.width)
+            positionX += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        return (CGSize(width: contentWidth, height: positionY + rowHeight), frames)
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct FailureSheet: View {
@@ -6,12 +7,12 @@ struct FailureSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(report.title)
+            Text(report.title.localized)
                 .font(.headline)
-            Text(report.reason)
+            Text(report.reason.localized)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
-                Text(report.log)
+                Text(report.log.localized)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -23,8 +24,16 @@ struct FailureSheet: View {
                     .stroke(Color.primary.opacity(0.12))
             }
             HStack {
+                Button {
+                    let text = [report.title.localized, report.reason.localized, report.log.localized]
+                        .joined(separator: "\n\n")
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Label(L10n.text("复制报告", "Copy Report"), systemImage: "doc.on.doc")
+                }
                 Spacer()
-                Button("好", action: close)
+                Button(L10n.text("好", "OK"), action: close)
                     .keyboardShortcut(.defaultAction)
             }
         }
