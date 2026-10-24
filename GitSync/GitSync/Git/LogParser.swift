@@ -76,9 +76,20 @@ enum LogParser {
     text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
       let pieces = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
       guard pieces.count == 2 else { return nil }
-      let name = String(pieces[1])
-      return name.isEmpty ? nil : name
+      return localBranchName(from: String(pieces[1]))
     }
+  }
+
+  static func parseRefNames(_ text: String) -> [String] {
+    text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+      localBranchName(from: String(line))
+    }
+  }
+
+  static func preferredDetachedBranch(exact: [String], recent: [String]) -> String? {
+    let names = exact.compactMap(localBranchName(from:))
+    return recent.first(where: names.contains)
+      ?? names.min { $0.localizedStandardCompare($1) == .orderedAscending }
   }
 
   static func parseRemoteBranches(_ text: String) -> [String] {
@@ -94,10 +105,43 @@ enum LogParser {
         else {
           return nil
         }
-        let name = String(first)
-        return name.isEmpty || name.hasSuffix("/HEAD") ? nil : name
+        return remoteBranchName(from: String(first))
       }
       .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+  }
+
+  static func localBranchName(from raw: String) -> String? {
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty else { return nil }
+    if value.hasPrefix("refs/heads/") {
+      let name = String(value.dropFirst("refs/heads/".count))
+      return name.isEmpty ? nil : name
+    }
+    if value.hasPrefix("refs/") { return nil }
+    return value
+  }
+
+  static func remoteBranchName(from raw: String) -> String? {
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty, !value.hasSuffix("/HEAD") else { return nil }
+    if value.hasPrefix("refs/remotes/") {
+      let name = String(value.dropFirst("refs/remotes/".count))
+      return name.isEmpty || name.hasSuffix("/HEAD") ? nil : name
+    }
+    if value.hasPrefix("remotes/") {
+      let name = String(value.dropFirst("remotes/".count))
+      return name.isEmpty || name.hasSuffix("/HEAD") ? nil : name
+    }
+    return value
+  }
+
+  static func matchingLocalBranch(_ remembered: String, existing: [String], current: String? = nil)
+    -> String?
+  {
+    if existing.contains(remembered) || remembered == current { return remembered }
+    guard remembered.hasPrefix("heads/") else { return nil }
+    let stripped = String(remembered.dropFirst("heads/".count))
+    return existing.contains(stripped) || stripped == current ? stripped : nil
   }
 
   private static func label(for status: String) -> LocalizedText {

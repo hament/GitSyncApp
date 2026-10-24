@@ -73,8 +73,15 @@ enum FailureLog {
         "需要登录。请使用系统已配置的 SSH 或 credential helper。",
         "Authentication is required. Use SSH or a credential helper configured on your system.")
     }
+    if let command = ambiguousPushCommand(from: outputs, combined: combined) {
+      return L10n.message(
+        "分支名和 tag 同名，Git 无法判断要推哪一个。请在终端执行：\n\(command)",
+        "The branch name also matches a tag, so Git cannot tell which one to push. Run this in Terminal:\n\(command)"
+      )
+    }
     if lower.contains("non-fast-forward")
       || lower.contains("failed to push some refs")
+      || combined.contains("无法推送一些引用")
       || lower.contains("updates were rejected")
     {
       return L10n.message("远程拒绝推送。", "The remote rejected the push.")
@@ -102,5 +109,45 @@ enum FailureLog {
       }
     }
     return L10n.message("Git 命令执行失败。", "The Git command failed.")
+  }
+
+  private static func ambiguousPushCommand(from outputs: [GitOutput], combined: String) -> String? {
+    let lower = combined.lowercased()
+    guard lower.contains("matches more than one") || combined.contains("匹配超过一个") else {
+      return nil
+    }
+    let refspec =
+      capturedRefspec(from: combined)
+      ?? outputs.compactMap(branchFromPushArgs).first
+      ?? "<分支名>"
+    return "git push -u origin refs/heads/\(localBranchFromRefspec(refspec))"
+  }
+
+  private static func capturedRefspec(from text: String) -> String? {
+    let patterns = [
+      "源引用规格\\s+(\\S+)\\s+匹配超过一个",
+      "src refspec\\s+(\\S+)\\s+matches more than one",
+    ]
+    for pattern in patterns {
+      if let match = text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+        let snippet = String(text[match])
+        let parts = snippet.split(whereSeparator: { $0.isWhitespace })
+        if parts.count >= 2 { return String(parts[1]) }
+      }
+    }
+    return nil
+  }
+
+  private static func branchFromPushArgs(_ output: GitOutput) -> String? {
+    guard let push = output.args.firstIndex(of: "push") else { return nil }
+    let rest = output.args.dropFirst(push + 1).filter { !$0.hasPrefix("-") }
+    guard rest.count >= 2 else { return nil }
+    return rest[rest.index(rest.startIndex, offsetBy: 1)]
+  }
+
+  private static func localBranchFromRefspec(_ name: String) -> String {
+    if name.hasPrefix("refs/heads/") { return String(name.dropFirst("refs/heads/".count)) }
+    if name.hasPrefix("heads/") { return String(name.dropFirst("heads/".count)) }
+    return name
   }
 }
