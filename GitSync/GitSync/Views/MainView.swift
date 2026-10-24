@@ -14,7 +14,7 @@ struct MainView: View {
                 workspace
             }
         }
-        .frame(minWidth: 1000, minHeight: 600)
+        .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(model.windowTitle)
         .background(WindowAutosave(model: model))
         .task {
@@ -89,7 +89,9 @@ struct MainView: View {
                 DiffView(model: model)
                     .frame(minWidth: 420)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var sidebar: some View {

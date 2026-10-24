@@ -31,11 +31,13 @@ struct TagsView: View {
                         .disabled(model.isWorking)
                 }
                 .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if filtered.isEmpty {
                 ContentUnavailableView(
                     model.tags.isEmpty ? L10n.text("暂无 Tag", "No Tags") : L10n.text("没有匹配的 Tag", "No Matching Tags"),
                     systemImage: "tag"
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -48,6 +50,7 @@ struct TagsView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func tagRow(_ tag: TagRecord) -> some View {
