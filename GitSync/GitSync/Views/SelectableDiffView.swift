@@ -257,3 +257,110 @@ final class DiffTextView: NSTextView {
     }
   }
 }
+
+/// A read-only source viewer with a fixed gutter outside the horizontal scroll area.
+struct SelectableSourceView: NSViewRepresentable {
+  var text: String
+  var identity: String
+
+  func makeCoordinator() -> Coordinator { Coordinator() }
+
+  func makeNSView(context: Context) -> NSScrollView {
+    let scroll = NSScrollView()
+    scroll.hasVerticalScroller = true
+    scroll.hasHorizontalScroller = true
+    scroll.autohidesScrollers = true
+    scroll.borderType = .noBorder
+    let source = NSTextView(frame: .zero)
+    source.isEditable = false
+    source.isSelectable = true
+    source.isRichText = false
+    source.allowsUndo = false
+    source.isHorizontallyResizable = true
+    source.isVerticallyResizable = true
+    source.maxSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    source.textContainerInset = NSSize(width: 12, height: 4)
+    source.textContainer?.widthTracksTextView = false
+    source.textContainer?.containerSize = source.maxSize
+    source.textContainer?.lineFragmentPadding = 0
+    source.backgroundColor = .textBackgroundColor
+    scroll.documentView = source
+    scroll.verticalRulerView = SourceLineRuler(scrollView: scroll, orientation: .verticalRuler)
+    scroll.hasVerticalRuler = true
+    scroll.rulersVisible = true
+    return scroll
+  }
+
+  func updateNSView(_ scroll: NSScrollView, context: Context) {
+    guard context.coordinator.text != text || context.coordinator.identity != identity,
+      let source = scroll.documentView as? NSTextView,
+      let ruler = scroll.verticalRulerView as? SourceLineRuler
+    else { return }
+    context.coordinator.text = text
+    context.coordinator.identity = identity
+    // Normalize line endings so every logical line occupies exactly one rendered row.
+    let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+      .components(separatedBy: .newlines)
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.minimumLineHeight = SourceLineRuler.rowHeight
+    paragraph.maximumLineHeight = SourceLineRuler.rowHeight
+    source.textStorage?.setAttributedString(
+      NSAttributedString(
+        string: lines.joined(separator: "\n"),
+        attributes: [
+          .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+          .foregroundColor: NSColor.textColor,
+          .paragraphStyle: paragraph,
+        ]))
+    ruler.lineCount = lines.count
+    ruler.ruleThickness = max(44, CGFloat(String(lines.count).count) * 8 + 20)
+    if let container = source.textContainer, let layout = source.layoutManager {
+      layout.ensureLayout(for: container)
+      let size = layout.usedRect(for: container).size
+      source.setFrameSize(
+        NSSize(
+          width: max(scroll.contentSize.width, ceil(size.width) + 24),
+          height: max(
+            scroll.contentSize.height, CGFloat(lines.count) * SourceLineRuler.rowHeight + 16)))
+    }
+    source.setSelectedRange(NSRange(location: 0, length: 0))
+    scroll.contentView.scroll(to: .zero)
+    scroll.reflectScrolledClipView(scroll.contentView)
+    ruler.needsDisplay = true
+  }
+
+  final class Coordinator {
+    var text: String?
+    var identity: String?
+  }
+}
+
+final class SourceLineRuler: NSRulerView {
+  override var isFlipped: Bool { true }
+  static let rowHeight: CGFloat = 22
+  var lineCount = 1
+
+  override func drawHashMarksAndLabels(in rect: NSRect) {
+    NSColor.controlBackgroundColor.setFill()
+    bounds.fill()
+    guard let scroll = scrollView, let source = scroll.documentView as? NSTextView else { return }
+    let visible = scroll.contentView.bounds
+    let inset = source.textContainerInset.height
+    let first = max(0, Int(floor((visible.minY - inset) / Self.rowHeight)))
+    let last = min(lineCount, Int(ceil((visible.maxY - inset) / Self.rowHeight)))
+    guard first < last else { return }
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+      .foregroundColor: NSColor.secondaryLabelColor,
+    ]
+    for index in first..<last {
+      let label = String(index + 1) as NSString
+      let origin = convert(NSPoint(x: 0, y: inset + CGFloat(index) * Self.rowHeight), from: source)
+      label.draw(
+        at: NSPoint(
+          x: ruleThickness - 10 - label.size(withAttributes: attributes).width,
+          y: origin.y + 4), withAttributes: attributes)
+    }
+  }
+}

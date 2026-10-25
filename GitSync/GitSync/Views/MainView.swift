@@ -35,6 +35,10 @@ struct MainView: View {
       FailureSheet(report: report) { model.failure = nil }
         .projectTheme(model.projectTheme)
     }
+    .sheet(isPresented: $model.showProjectInfo) {
+      ProjectInfoView(model: model)
+        .projectTheme(model.projectTheme)
+    }
     .sheet(isPresented: $model.showNewBranch) {
       NewBranchSheet(model: model)
         .projectTheme(model.projectTheme)

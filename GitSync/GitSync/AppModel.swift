@@ -84,6 +84,7 @@ final class AppModel {
 
   var failure: FailureReport?
   var dialog: AppDialog?
+  var showProjectInfo = false
   var showNewBranch = false
   var newBranchStartCommit: String?
   var showBranchComparison = false

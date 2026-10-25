@@ -18,7 +18,7 @@ struct SettingsButton: View {
     .help(L10n.text("设置", "Settings"))
     .accessibilityLabel(L10n.text("设置", "Settings"))
     .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-      SettingsView(model: model)
+      SettingsView(model: model, close: { isPresented = false })
         .environment(\.locale, LanguageSettings.shared.language.locale)
         .projectTheme(theme)
     }
@@ -27,6 +27,7 @@ struct SettingsButton: View {
 
 struct SettingsView: View {
   var model: AppModel? = nil
+  var close: () -> Void = {}
   @Bindable private var settings = LanguageSettings.shared
 
   var body: some View {
@@ -41,6 +42,15 @@ struct SettingsView: View {
       .pickerStyle(.menu)
       .accessibilityIdentifier("settings.language")
       if let model {
+        Divider()
+        Button {
+          close()
+          model.showProjectInfo = true
+        } label: {
+          Label(L10n.text("项目信息", "Project Info"), systemImage: "info.circle")
+        }
+        .disabled(model.repositoryPath == nil)
+        .accessibilityIdentifier("settings.projectInfo")
         Divider()
         Text(L10n.text("项目主题色", "Project color"))
           .font(.subheadline)
@@ -89,5 +99,90 @@ struct SettingsView: View {
     }
     .padding(20)
     .frame(width: 300)
+  }
+}
+
+struct ProjectInfoView: View {
+  var model: AppModel
+  @Environment(\.dismiss) private var dismiss
+  @State private var address = ""
+  @State private var loading = true
+  @State private var errorMessage: String?
+  @State private var copiedValue: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      Text(L10n.text("项目信息", "Project Info")).font(.headline)
+      Divider()
+      information(L10n.text("仓库名称", "Repository name"), value: model.repositoryDisplayName)
+      if loading {
+        ProgressView().controlSize(.small)
+      } else {
+        information(L10n.text("仓库地址", "Repository URL"), value: address)
+        if let errorMessage {
+          Text(errorMessage).foregroundStyle(.secondary).font(.caption)
+        }
+      }
+      HStack {
+        Spacer()
+        Button(L10n.text("关闭", "Close")) { dismiss() }
+          .keyboardShortcut(.cancelAction)
+      }
+    }
+    .padding(24)
+    .frame(width: 500)
+    .task(id: model.repositoryPath) { await loadAddress() }
+    .task(id: copiedValue) {
+      guard copiedValue != nil else { return }
+      do { try await Task.sleep(for: .seconds(2)) } catch { return }
+      copiedValue = nil
+    }
+  }
+
+  private func information(_ title: String, value: String) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(title).font(.subheadline).foregroundStyle(.secondary)
+      HStack(alignment: .top) {
+        Text(value.isEmpty ? L10n.text("未配置远程仓库", "No remote configured") : value)
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Button {
+          NSPasteboard.general.clearContents()
+          if NSPasteboard.general.setString(value, forType: .string) { copiedValue = title }
+        } label: {
+          Image(systemName: copiedValue == title ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(.borderless)
+        .disabled(value.isEmpty)
+        .help(L10n.text("复制", "Copy"))
+        .accessibilityLabel(L10n.text("复制", "Copy") + " " + title)
+      }
+    }
+  }
+
+  private func loadAddress() async {
+    loading = true
+    address = ""
+    errorMessage = nil
+    guard let path = model.repositoryPath else {
+      loading = false
+      return
+    }
+    let cwd = URL(fileURLWithPath: path, isDirectory: true)
+    let remotes = await GitClient.run(args: ["remote"], cwd: cwd)
+    guard !Task.isCancelled, model.repositoryPath == path else { return }
+    let names = remotes.stdoutText.split(separator: "\n").map(String.init)
+    if !remotes.succeeded {
+      errorMessage = L10n.text("无法读取仓库地址", "Unable to read repository URL")
+    } else if let remote = names.contains("origin") ? "origin" : names.first {
+      let output = await GitClient.run(args: ["remote", "get-url", remote], cwd: cwd)
+      guard !Task.isCancelled, model.repositoryPath == path else { return }
+      if output.succeeded {
+        address = output.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)
+      } else {
+        errorMessage = L10n.text("无法读取仓库地址", "Unable to read repository URL")
+      }
+    }
+    loading = false
   }
 }
