@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 
 struct DiffTextRow {
@@ -313,7 +314,11 @@ struct SelectableSourceView: NSViewRepresentable {
           .foregroundColor: NSColor.textColor,
           .paragraphStyle: paragraph,
         ]))
-    ruler.lineCount = lines.count
+    var offset = 0
+    ruler.lineStarts = lines.map { line in
+      defer { offset += (line as NSString).length + 1 }
+      return offset
+    }
     ruler.ruleThickness = max(44, CGFloat(String(lines.count).count) * 8 + 20)
     if let container = source.textContainer, let layout = source.layoutManager {
       layout.ensureLayout(for: container)
@@ -322,7 +327,7 @@ struct SelectableSourceView: NSViewRepresentable {
         NSSize(
           width: max(scroll.contentSize.width, ceil(size.width) + 24),
           height: max(
-            scroll.contentSize.height, CGFloat(lines.count) * SourceLineRuler.rowHeight + 16)))
+            scroll.contentSize.height, ceil(size.height) + 16)))
     }
     source.setSelectedRange(NSRange(location: 0, length: 0))
     scroll.contentView.scroll(to: .zero)
@@ -339,28 +344,59 @@ struct SelectableSourceView: NSViewRepresentable {
 final class SourceLineRuler: NSRulerView {
   override var isFlipped: Bool { true }
   static let rowHeight: CGFloat = 22
-  var lineCount = 1
+  var lineStarts = [0]
 
   override func drawHashMarksAndLabels(in rect: NSRect) {
     NSColor.controlBackgroundColor.setFill()
     bounds.fill()
-    guard let scroll = scrollView, let source = scroll.documentView as? NSTextView else { return }
-    let visible = scroll.contentView.bounds
-    let inset = source.textContainerInset.height
-    let first = max(0, Int(floor((visible.minY - inset) / Self.rowHeight)))
-    let last = min(lineCount, Int(ceil((visible.maxY - inset) / Self.rowHeight)))
-    guard first < last else { return }
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-      .foregroundColor: NSColor.secondaryLabelColor,
-    ]
-    for index in first..<last {
-      let label = String(index + 1) as NSString
-      let origin = convert(NSPoint(x: 0, y: inset + CGFloat(index) * Self.rowHeight), from: source)
-      label.draw(
-        at: NSPoint(
-          x: ruleThickness - 10 - label.size(withAttributes: attributes).width,
-          y: origin.y + 4), withAttributes: attributes)
+    guard let scroll = scrollView, let source = scroll.documentView as? NSTextView,
+      let layout = source.layoutManager, let container = source.textContainer
+    else { return }
+    let origin = source.textContainerOrigin
+    let visible = scroll.contentView.bounds.offsetBy(dx: -origin.x, dy: -origin.y)
+    let glyphs = layout.glyphRange(forBoundingRect: visible, in: container)
+    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+
+    layout.enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, _, range, _ in
+      let character = layout.characterIndexForGlyph(at: range.location)
+      // Find the logical line without assuming a fixed rendered line height.
+      var low = 0
+      var high = self.lineStarts.count
+      while low < high {
+        let middle = (low + high) / 2
+        if self.lineStarts[middle] <= character { low = middle + 1 } else { high = middle }
+      }
+      let baseline = origin.y + fragment.minY + layout.location(forGlyphAt: range.location).y
+      self.drawNumber(max(1, low), baseline: baseline, source: source, font: font)
     }
+
+    // A trailing newline (or an empty file) has an extra line without glyphs.
+    if layout.extraLineFragmentTextContainer === container,
+      layout.extraLineFragmentRect.intersects(visible)
+    {
+      let baseline =
+        origin.y + layout.extraLineFragmentRect.minY
+        + layout.defaultBaselineOffset(for: font)
+      drawNumber(lineStarts.count, baseline: baseline, source: source, font: font)
+    }
+  }
+
+  private func drawNumber(_ number: Int, baseline: CGFloat, source: NSTextView, font: NSFont) {
+    guard let context = NSGraphicsContext.current?.cgContext else { return }
+    let label = NSAttributedString(
+      string: String(number),
+      attributes: [
+        .font: font, .foregroundColor: NSColor.secondaryLabelColor,
+      ])
+    let line = CTLineCreateWithAttributedString(label)
+    let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    let position = convert(NSPoint(x: 0, y: baseline), from: source)
+    context.saveGState()
+    context.translateBy(x: ruleThickness - 10 - width, y: position.y)
+    context.scaleBy(x: 1, y: -1)
+    context.textMatrix = .identity
+    context.textPosition = .zero
+    CTLineDraw(line, context)
+    context.restoreGState()
   }
 }
