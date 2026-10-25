@@ -81,7 +81,7 @@ struct ComparisonView: View {
             if let diffError {
               errorView(diffError) { Task { await loadDiff() } }
             } else {
-              DiffView(model: diffModel, comparison: true)
+              DiffView(model: diffModel, comparison: true, comparisonRequest: request)
                 .overlay {
                   if loadingDiff {
                     ProgressView()
