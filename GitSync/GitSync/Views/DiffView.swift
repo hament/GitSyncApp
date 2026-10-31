@@ -70,17 +70,22 @@ struct DiffView: View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 1) {
         Label(
-          comparison ? L10n.text("当前分支", "Current branch") : L10n.text("旧文件", "Old file"),
+          comparison
+            ? (comparisonRequest?.baseLabel ?? L10n.text("当前分支", "Current branch"))
+            : L10n.text("旧文件", "Old file"),
           systemImage: "arrow.left"
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         Label(
-          comparison ? L10n.text("对比文件", "Comparison file") : L10n.text("新文件", "New file"),
+          comparison
+            ? (comparisonRequest?.headLabel ?? L10n.text("对比文件", "Comparison file"))
+            : L10n.text("新文件", "New file"),
           systemImage: "arrow.right"
         )
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       .font(.caption)
+      .lineLimit(1)
       .foregroundStyle(.secondary)
       .padding(.horizontal, 10)
       .frame(height: 30)

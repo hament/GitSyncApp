@@ -23,6 +23,18 @@ struct MyApp: App {
     .windowStyle(.titleBar)
     .windowToolbarStyle(.expanded)
     .defaultSize(width: 1100, height: 720)
+
+    WindowGroup(L10n.text("PR 冲突检查", "PR Conflict Check"), for: MergePreviewRequest.self) {
+      $request in
+      if let request {
+        MergePreviewView(request: request)
+          .environment(\.locale, LanguageSettings.shared.language.locale)
+          .projectTheme(ProjectAppearance.shared.theme(for: request.repositoryPath))
+      }
+    }
+    .windowStyle(.titleBar)
+    .windowToolbarStyle(.expanded)
+    .defaultSize(width: 1150, height: 760)
   }
 }
 

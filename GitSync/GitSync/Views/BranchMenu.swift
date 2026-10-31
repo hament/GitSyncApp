@@ -26,6 +26,7 @@ struct BranchMenu: View {
 private struct BranchPanel: View {
   @Bindable var model: AppModel
   var dismiss: () -> Void
+  @Environment(\.openWindow) private var openWindow
   @State private var query = ""
   @State private var sections: BranchListSections?
   @FocusState private var searchFocused: Bool
@@ -76,6 +77,16 @@ private struct BranchPanel: View {
           model.presentBranchComparison()
         }
         .disabled(model.isWorking)
+        Button {
+          guard let path = model.repositoryPath, let branch = model.currentBranchName else {
+            return
+          }
+          dismiss()
+          openWindow(value: MergePreviewRequest(repositoryPath: path, headBranch: branch))
+        } label: {
+          Label(L10n.text("PR 冲突检查…", "PR Conflict Check…"), systemImage: "arrow.triangle.pull")
+        }
+        .disabled(model.isWorking || model.isDetached || model.currentBranchName == nil)
         if model.isDetached {
           Text(L10n.text("请先创建或切换到一个分支", "Create or switch to a branch first"))
             .font(.caption)

@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolbarView: View {
   @Bindable var model: AppModel
   @State private var pathCopyID: UUID?
+  @State private var branchCopyID: UUID?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -128,6 +129,32 @@ struct ToolbarView: View {
 
       HStack(alignment: .center, spacing: 12) {
         BranchMenu(model: model)
+        Button {
+          guard let branch = model.currentBranchName, !branch.isEmpty, !model.isDetached else {
+            return
+          }
+          NSPasteboard.general.clearContents()
+          if NSPasteboard.general.setString(branch, forType: .string) {
+            branchCopyID = UUID()
+          }
+        } label: {
+          Image(systemName: branchCopyID == nil ? "doc.on.doc" : "checkmark")
+        }
+        .buttonStyle(CommitCopyButtonStyle())
+        .disabled(model.isDetached || model.currentBranchName?.isEmpty != false)
+        .help(
+          branchCopyID == nil
+            ? L10n.text("复制当前分支名称", "Copy current branch name")
+            : L10n.text("分支名称已复制", "Branch name copied")
+        )
+        .accessibilityLabel(L10n.text("复制当前分支名称", "Copy current branch name"))
+        .task(id: branchCopyID) {
+          guard branchCopyID != nil else { return }
+          do { try await Task.sleep(for: .seconds(2)) } catch { return }
+          branchCopyID = nil
+        }
+        .onChange(of: model.currentBranchName) { branchCopyID = nil }
+        .onChange(of: model.repositoryPath) { branchCopyID = nil }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 12)

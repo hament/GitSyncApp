@@ -2,23 +2,51 @@ import SwiftUI
 
 struct ChangesList: View {
   @Bindable var model: AppModel
+  @State private var conflictsOnly = false
+
+  private var hasConflicts: Bool {
+    model.files.contains { $0.kind == .conflict }
+  }
+
+  private var visibleFiles: [FileChange] {
+    conflictsOnly && hasConflicts ? model.files.filter { $0.kind == .conflict } : model.files
+  }
+
+  private var allVisibleChecked: Bool {
+    !visibleFiles.isEmpty && visibleFiles.allSatisfy { model.checkedPaths.contains($0.path) }
+  }
 
   var body: some View {
     VStack(spacing: 0) {
       HStack {
-        Text(L10n.text("变更 · \(model.files.count)", "Changes · \(model.files.count)"))
+        Text(L10n.text("变更 · \(visibleFiles.count)", "Changes · \(visibleFiles.count)"))
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
-        Button(model.allChecked ? L10n.text("取消全选", "Deselect All") : L10n.text("全选", "Select All"))
-        {
-          model.toggleSelectAll()
+        Button(
+          allVisibleChecked ? L10n.text("取消全选", "Deselect All") : L10n.text("全选", "Select All")
+        ) {
+          let paths = Set(visibleFiles.map(\.path))
+          if allVisibleChecked {
+            model.checkedPaths.subtract(paths)
+          } else {
+            model.checkedPaths.formUnion(paths)
+          }
         }
-        .disabled(model.files.isEmpty || model.isWorking)
+        .disabled(visibleFiles.isEmpty || model.isWorking)
         .buttonStyle(.borderless)
       }
       .padding(.horizontal, 12)
       .padding(.bottom, 6)
+
+      if hasConflicts {
+        Toggle(L10n.text("仅冲突", "Conflicts Only"), isOn: $conflictsOnly)
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 12)
+          .padding(.bottom, 6)
+      }
 
       if model.files.isEmpty {
         Text(L10n.text("工作区没有修改", "No changes in the working tree"))
@@ -26,14 +54,14 @@ struct ChangesList: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         List(selection: $model.selectedChangePaths) {
-          ForEach(model.files) { file in
+          ForEach(visibleFiles) { file in
             row(file)
               .tag(file.path)
           }
         }
         .listStyle(.plain)
         .contextMenu(forSelectionType: String.self) { paths in
-          let targets = model.files.filter { paths.contains($0.path) }
+          let targets = visibleFiles.filter { paths.contains($0.path) }
           if !targets.isEmpty {
             Button(L10n.text("放弃修改", "Discard Changes")) {
               model.dialog = .discardFiles(targets)
@@ -73,8 +101,8 @@ struct ChangesList: View {
         }
         .onChange(of: model.selectedChangePaths) { previous, current in
           let added = current.subtracting(previous)
-          if let file = model.files.first(where: { added.contains($0.path) })
-            ?? model.files.first(where: { current.contains($0.path) })
+          if let file = visibleFiles.first(where: { added.contains($0.path) })
+            ?? visibleFiles.first(where: { current.contains($0.path) })
           {
             model.selectChange(file.path)
           } else {
@@ -84,6 +112,21 @@ struct ChangesList: View {
           }
         }
       }
+    }
+    .onChange(of: visibleFiles.map(\.path)) { _, paths in
+      let visiblePaths = Set(paths)
+      model.selectedChangePaths.formIntersection(visiblePaths)
+      if let selectedPath = model.selectedPath, !visiblePaths.contains(selectedPath) {
+        model.selectedPath = nil
+        model.diff = .empty
+        model.diffTitle = ""
+      }
+    }
+    .onChange(of: hasConflicts) { _, hasConflicts in
+      if !hasConflicts { conflictsOnly = false }
+    }
+    .onChange(of: model.repositoryPath) { _, _ in
+      conflictsOnly = false
     }
   }
 

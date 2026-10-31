@@ -43,7 +43,20 @@ enum FailureLog {
     return "\(notice)\n\n\(tail)"
   }
 
+  static func needsPullStrategy(_ output: GitOutput) -> Bool {
+    guard output.exitCode != 0, output.args.first == "pull" else { return false }
+    let text = output.stdoutText + "\n" + output.stderrText
+    return text.localizedCaseInsensitiveContains(
+      "Need to specify how to reconcile divergent branches")
+      || text.contains("需要指定如何调和")
+  }
+
   static func reason(action: LocalizedText, outputs: [GitOutput], conflict: Bool) -> LocalizedText {
+    if outputs.contains(where: { needsPullStrategy($0) }) {
+      return L10n.message(
+        "本地与远程分支已分叉，需要选择合并或变基后再拉取。",
+        "Local and remote branches have diverged. Choose merge or rebase to pull.")
+    }
     if conflict {
       if action.chinese == "拉取" { return L10n.message("拉取产生冲突。", "Pull resulted in conflicts.") }
       return L10n.message(

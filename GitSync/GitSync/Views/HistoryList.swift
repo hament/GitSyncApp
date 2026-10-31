@@ -3,6 +3,8 @@ import SwiftUI
 struct HistoryList: View {
   var model: AppModel
   @Environment(\.openWindow) private var openWindow
+  @State private var searchQuery = ""
+  @State private var searchField: HistorySearchField = .hash
 
   private var relative: RelativeDateTimeFormatter {
     let formatter = RelativeDateTimeFormatter()
@@ -30,6 +32,79 @@ struct HistoryList: View {
       .padding(.horizontal, 10)
       .padding(.bottom, 8)
 
+      HStack(spacing: 6) {
+        Button {
+          model.searchHistory(searchQuery, field: searchField)
+        } label: {
+          Image(systemName: "magnifyingglass")
+            .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .help(L10n.text("搜索提交", "Search commits"))
+        .accessibilityLabel(L10n.text("搜索提交", "Search commits"))
+
+        TextField(
+          searchField == .hash
+            ? L10n.text("搜索 Commit 号", "Search commit ID")
+            : L10n.text("搜索提交者名称", "Search author name"),
+          text: $searchQuery
+        )
+        .textFieldStyle(.plain)
+        .frame(minWidth: 0)
+        .layoutPriority(1)
+        .onSubmit { model.searchHistory(searchQuery, field: searchField) }
+        .onChange(of: searchQuery) {
+          if searchQuery.isEmpty {
+            model.searchHistory("", field: searchField)
+          }
+        }
+
+        Button {
+          searchQuery = ""
+          model.searchHistory("", field: searchField)
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .frame(width: 14, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .opacity(searchQuery.isEmpty ? 0 : 1)
+        .disabled(searchQuery.isEmpty)
+        .accessibilityHidden(searchQuery.isEmpty)
+        .help(L10n.text("清除搜索", "Clear search"))
+        .accessibilityLabel(L10n.text("清除搜索", "Clear search"))
+
+        Divider()
+          .frame(height: 16)
+
+        Picker(
+          L10n.text("搜索方式", "Search by"),
+          selection: $searchField
+        ) {
+          ForEach(HistorySearchField.allCases, id: \.self) { field in
+            Text(field.title).tag(field)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .frame(width: 88)
+        .help(L10n.text("搜索方式", "Search by"))
+        .onChange(of: searchField) {
+          model.searchHistory(searchQuery, field: searchField)
+        }
+      }
+      .padding(.horizontal, 7)
+      .frame(height: 30)
+      .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+      .overlay {
+        RoundedRectangle(cornerRadius: 5)
+          .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+      }
+      .disabled(model.isWorking)
+      .padding(.horizontal, 10)
+      .padding(.bottom, 8)
+
       HStack {
         Text(scopeDescription)
           .font(.caption)
@@ -46,12 +121,15 @@ struct HistoryList: View {
         Text(
           model.isRefreshing
             ? L10n.text("正在读取提交历史…", "Loading commit history…")
-            : L10n.text("还没有提交", "No commits yet")
+            : model.historySearchQuery.isEmpty
+              ? L10n.text("还没有提交", "No commits yet")
+              : L10n.text("没有匹配的提交", "No matching commits")
         )
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        let graphRows = model.commitGraphRows
+        let graphRows: [String: CommitGraphRow] =
+          model.historySearchQuery.isEmpty ? model.commitGraphRows : [:]
         let maximumLaneCount = max(graphRows.values.map(\.laneCount).max() ?? 1, 1)
         ScrollView {
           LazyVStack(alignment: .leading, spacing: 1) {
@@ -74,6 +152,14 @@ struct HistoryList: View {
           .padding(.bottom, 8)
         }
       }
+    }
+    .onAppear {
+      searchQuery = model.historySearchQuery
+      searchField = model.historySearchField
+    }
+    .onChange(of: model.repositoryPath) {
+      searchQuery = model.historySearchQuery
+      searchField = model.historySearchField
     }
   }
 

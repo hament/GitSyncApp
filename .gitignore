@@ -9,10 +9,17 @@ Tests
 !/Tests/
 /Tests/*
 !/Tests/BranchListTests.swift
+!/Tests/GitHookEnvironmentTests.swift
 !/Tests/CloneAuthenticationGuideTests.swift
 !/Tests/CloneAuthenticationFlowTests.swift
 !/Tests/run-clone-auth-regressions.sh
 !/Tests/RecentRepositoryTests.swift
+!/Tests/MergePreviewTests.swift
+!/Tests/run-merge-preview-regressions.sh
+!/Tests/HistorySearchTests.swift
+!/Tests/run-history-search-regressions.sh
+!/Tests/PullStrategyTests.swift
+!/Tests/run-pull-strategy-regressions.sh
 
 # other
 codeimages

@@ -196,6 +196,7 @@ struct MainView: View {
 
   private var dialogTitle: String {
     switch model.dialog {
+    case .pullStrategy: L10n.text("选择拉取策略", "Choose Pull Strategy")
     case .discard: L10n.text("放弃修改", "Discard Changes")
     case .discardFiles: L10n.text("放弃所选修改", "Discard Selected Changes")
     case .removePathsFromIndex: L10n.text("忽略已跟踪项目", "Ignore Tracked Items")
@@ -214,6 +215,11 @@ struct MainView: View {
 
   private var dialogMessage: String {
     switch model.dialog {
+    case .pullStrategy:
+      return L10n.text(
+        "本地和远程各有独立提交。合并保留双方历史，必要时创建合并提交；变基会重写本地提交，请勿用于已共享的提交。仅本次生效，不修改 Git 配置。",
+        "Local and remote branches each have unique commits. Merge preserves both histories and may create a merge commit. Rebase rewrites local commits; do not use it for shared commits. This choice applies only once and does not change Git configuration."
+      )
     case .deleteTag(let tag):
       return L10n.text(
         "删除本地 Tag「\(tag.name)」？不会删除提交、文件或远程 Tag。",
@@ -277,6 +283,14 @@ struct MainView: View {
   @ViewBuilder
   private var dialogButtons: some View {
     switch model.dialog {
+    case .pullStrategy:
+      Button(L10n.text("合并拉取", "Pull with Merge")) {
+        Task { await model.pull(strategy: .merge) }
+      }
+      Button(L10n.text("变基拉取", "Pull with Rebase")) {
+        Task { await model.pull(strategy: .rebase) }
+      }
+      Button(L10n.text("取消", "Cancel"), role: .cancel) {}
     case .deleteTag(let tag):
       Button(L10n.text("删除本地 Tag", "Delete Local Tag"), role: .destructive) {
         Task { await model.deleteTag(tag) }

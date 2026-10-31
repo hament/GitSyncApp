@@ -3,6 +3,7 @@ import SwiftUI
 struct CommitFilesView: View {
   var model: AppModel
   @State private var copyToastID: UUID?
+  @State private var authorCopyID: UUID?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -42,6 +43,12 @@ struct CommitFilesView: View {
     }
     .onChange(of: model.selectedCommitHash) {
       copyToastID = nil
+      authorCopyID = nil
+    }
+    .task(id: authorCopyID) {
+      guard authorCopyID != nil else { return }
+      do { try await Task.sleep(for: .seconds(2)) } catch { return }
+      authorCopyID = nil
     }
   }
 
@@ -56,8 +63,29 @@ struct CommitFilesView: View {
           .foregroundStyle(.green)
         Text(commit.authorName)
           .lineLimit(1)
-        Text("·")
-          .foregroundStyle(.tertiary)
+          .help(commit.authorName)
+        Button {
+          NSPasteboard.general.clearContents()
+          if NSPasteboard.general.setString(commit.authorName, forType: .string) {
+            authorCopyID = UUID()
+          }
+        } label: {
+          Image(systemName: authorCopyID == nil ? "doc.on.doc" : "checkmark")
+        }
+        .buttonStyle(CommitCopyButtonStyle())
+        .disabled(commit.authorName.isEmpty)
+        .help(
+          authorCopyID == nil
+            ? L10n.text("复制作者名称", "Copy author name")
+            : L10n.text("作者名称已复制", "Author name copied")
+        )
+        .accessibilityLabel(L10n.text("复制作者名称", "Copy author name"))
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+
+      HStack(spacing: 6) {
+        Image(systemName: "clock")
         Text(
           commit.date.formatted(
             Date.FormatStyle(date: .abbreviated, time: .shortened)

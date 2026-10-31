@@ -44,6 +44,8 @@ final class AppModel {
 
   var mode: SidebarMode = .changes
   var historyScope: HistoryScope = .current
+  private(set) var historySearchField: HistorySearchField = .hash
+  private(set) var historySearchQuery = ""
   var commits: [CommitRecord] = []
   var canLoadMoreHistory = false
   var selectedCommitHash: String?
@@ -110,6 +112,12 @@ final class AppModel {
   }
 
   var windowTitle: String {
+    if let repositoryURL {
+      let directoryName = repositoryURL.lastPathComponent
+      let repositoryName = repositoryDisplayName.isEmpty ? directoryName : repositoryDisplayName
+      return repositoryName == directoryName
+        ? repositoryName : "\(repositoryName)(\(directoryName))"
+    }
     let displayName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)?
       .trimmingCharacters(in: .whitespacesAndNewlines)
     return displayName.flatMap { $0.isEmpty ? nil : $0 } ?? "Git Sync"
@@ -366,6 +374,19 @@ final class AppModel {
   func setHistoryScope(_ scope: HistoryScope) {
     guard historyScope != scope, !isWorking else { return }
     historyScope = scope
+    reloadHistory()
+  }
+
+  func searchHistory(_ query: String, field: HistorySearchField) {
+    guard !isWorking else { return }
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard historySearchQuery != trimmedQuery || historySearchField != field else { return }
+    historySearchQuery = trimmedQuery
+    historySearchField = field
+    reloadHistory()
+  }
+
+  private func reloadHistory() {
     commits = []
     canLoadMoreHistory = false
     selectedCommitHash = nil
@@ -375,8 +396,8 @@ final class AppModel {
     diffTitle = ""
     startRefresh(
       label: L10n.message(
-        "正在读取\(scope.titleText.chinese)历史（git log）…",
-        "Reading history for \(scope.titleText.english) (git log)…")
+        "正在读取\(historyScope.titleText.chinese)历史（git log）…",
+        "Reading history for \(historyScope.titleText.english) (git log)…")
     ) {
       await self.loadHistory(reset: true, alertOnFailure: true)
     }
@@ -952,11 +973,12 @@ final class AppModel {
     await refresh(alertOnFailure: true, updateDivergence: true)
   }
 
-  func pull() async {
+  func pull(strategy: PullStrategy? = nil) async {
     guard let cwd = repositoryURL, begin(L10n.message("正在拉取（git pull）…", "Pulling (git pull)…"))
     else { return }
     defer { end() }
-    let output = await git.run(args: ["pull"], cwd: cwd, timeout: 120)
+    let output = await git.run(
+      args: ["pull"] + (strategy?.arguments ?? []), cwd: cwd, timeout: 120)
     guard !cancelRequested else { return }
     let text = output.stdoutText + "\n" + output.stderrText
     if output.exitCode == 0 {
@@ -969,6 +991,11 @@ final class AppModel {
       return
     }
     await refresh(alertOnFailure: false, updateDivergence: true)
+    guard !cancelRequested else { return }
+    if strategy == nil, FailureLog.needsPullStrategy(output) {
+      dialog = .pullStrategy
+      return
+    }
     let conflict =
       mergeInProgress || text.localizedCaseInsensitiveContains("CONFLICT")
       || text.localizedCaseInsensitiveContains("fix conflicts")
@@ -1607,9 +1634,12 @@ final class AppModel {
   private func loadHistory(reset: Bool, alertOnFailure: Bool, generation gen: Int? = nil) async {
     guard let cwd = repositoryURL else { return }
     let token = gen ?? generation
+    let scope = historyScope
+    let searchQuery = historySearchQuery
+    let searchField = historySearchField
     let skip = reset ? 0 : commits.count
     var arguments = ["log"]
-    switch historyScope {
+    switch scope {
     case .current:
       break
     case .mainline:
@@ -1617,9 +1647,11 @@ final class AppModel {
     case .all:
       arguments.append(contentsOf: ["--all", "--topo-order", "--date-order"])
     }
+    if searchQuery.isEmpty {
+      arguments.append(contentsOf: ["-n", "100", "--skip", "\(skip)"])
+    }
     arguments.append(contentsOf: [
-      "-n", "100", "--skip", "\(skip)",
-      "--pretty=format:%H%x1f%P%x1f%D%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
+      "--pretty=format:%H%x1f%P%x1f%D%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"
     ])
     let output = await git.run(
       args: arguments,
@@ -1627,6 +1659,9 @@ final class AppModel {
     )
     guard !cancelRequested else { return }
     guard token == generation else { return }
+    guard scope == historyScope, searchQuery == historySearchQuery,
+      searchField == historySearchField
+    else { return }
     if output.exitCode != 0 {
       let blob = output.stderrText + output.stdoutText
       if blob.contains("does not have any commits") {
@@ -1641,14 +1676,21 @@ final class AppModel {
       }
       return
     }
-    let parsed = LogParser.parseCommits(output.stdoutText)
+    let history = LogParser.parseCommits(output.stdoutText)
+    let parsed: [CommitRecord]
+    if searchQuery.isEmpty {
+      parsed = history
+      canLoadMoreHistory = parsed.count == 100
+    } else {
+      let matches = history.filter { searchField.matches($0, query: searchQuery) }
+      parsed = Array(matches.dropFirst(skip).prefix(100))
+      canLoadMoreHistory = matches.count > skip + parsed.count
+    }
     if reset {
       commits = parsed
     } else {
       commits.append(contentsOf: parsed)
     }
-    canLoadMoreHistory = parsed.count == 100
-
     if reset, mode == .history {
       let selectionIsVisible =
         selectedCommitHash.map { selected in
@@ -1843,6 +1885,8 @@ final class AppModel {
 
   private func resetWorkspace() {
     tagLoadToken += 1
+    historySearchQuery = ""
+    historySearchField = .hash
     savedHistoryHash = nil
     savedHistoryPath = nil
     tagSelectedPaths = [:]

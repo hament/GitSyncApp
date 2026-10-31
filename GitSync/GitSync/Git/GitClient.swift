@@ -175,8 +175,21 @@ enum GitClient {
   private nonisolated static func augmentedPath(_ existing: String?) -> String {
     let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/bin"]
     let current = existing?.split(separator: ":").map(String.init) ?? []
+    let pythonDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Python", isDirectory: true)
+    let pythonVersions =
+      (try? FileManager.default.contentsOfDirectory(
+        at: pythonDirectory, includingPropertiesForKeys: nil)) ?? []
+    let pythonBins =
+      pythonVersions
+      .filter { $0.lastPathComponent.first?.isNumber == true }
+      .sorted {
+        $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedDescending
+      }
+      .map { $0.appendingPathComponent("bin", isDirectory: true).path }
     var seen = Set<String>()
-    return (extras + current).filter { seen.insert($0).inserted }.joined(separator: ":")
+    return (extras + current + pythonBins).filter { seen.insert($0).inserted }.joined(
+      separator: ":")
   }
 }
 

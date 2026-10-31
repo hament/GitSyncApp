@@ -84,6 +84,23 @@ nonisolated struct CommitRecord: Identifiable, Hashable, Sendable {
   var isMerge: Bool { parentHashes.count > 1 }
 }
 
+nonisolated enum HistorySearchField: String, CaseIterable, Hashable, Sendable {
+  case hash
+  case author
+
+  @MainActor var title: String {
+    switch self {
+    case .hash: L10n.text("Commit 号", "Commit ID")
+    case .author: L10n.text("提交者", "Author")
+    }
+  }
+
+  func matches(_ commit: CommitRecord, query: String) -> Bool {
+    let value = self == .hash ? commit.hash : commit.authorName
+    return value.range(of: query, options: [.caseInsensitive, .literal]) != nil
+  }
+}
+
 nonisolated enum HistoryScope: String, CaseIterable, Hashable, Sendable {
   case current
   case mainline
@@ -289,6 +306,18 @@ nonisolated struct FailureReport: Identifiable, Hashable, Sendable {
   }
 }
 
+nonisolated enum PullStrategy: Sendable {
+  case merge
+  case rebase
+
+  var arguments: [String] {
+    switch self {
+    case .merge: ["--no-rebase", "--no-edit"]
+    case .rebase: ["--rebase"]
+    }
+  }
+}
+
 nonisolated enum AppDialog: Identifiable, Hashable, Sendable {
   case discard(FileChange)
   case discardFiles([FileChange])
@@ -296,6 +325,7 @@ nonisolated enum AppDialog: Identifiable, Hashable, Sendable {
   case removeFromIndex(FileChange)
   case removeFolderFromIndex(String)
   case merge(String)
+  case pullStrategy
   case deleteBranch(String)
   case deleteTag(TagRecord)
   case abortMerge
@@ -305,6 +335,7 @@ nonisolated enum AppDialog: Identifiable, Hashable, Sendable {
 
   var id: String {
     switch self {
+    case .pullStrategy: "pull-strategy"
     case .discard(let file): "discard:\(file.path)"
     case .removeFromIndex(let file): "untrack:\(file.path)"
     case .removeFolderFromIndex(let path): "untrack-folder:\(path)"
